@@ -23,8 +23,12 @@
  *
  * 「未仕入れフラグ」はブランド名・商品名の単語一致による目安であり、
  * 最終判断は人間の確認が必要(型番のような構造化データが双方に無いため)。
- * 「推定利益率20-30%」はHIVE側のデータから計算した数字ではなく、
- * 固定の参考値としてそのまま書き出しているだけ。
+ *
+ * 「仕入れ値上限」について: HIVEの販売価格そのものが実際の落札可能額の保証では
+ * ないため、これは「HIVEと同程度の価格で売れると仮定した場合、粗利率20%/30%を
+ * 確保するにはいくら以下で仕入れる必要があるか」という参考の目安。想定手数料率・
+ * 想定送料実費は仕入れ判断シートのP2/P3セルで調整できる(初期値: eBay手数料14.4%、
+ * 送料1500円)。
  */
 
 const HIVE_STORE_DOMAIN = 'hivepreloved.com';
@@ -37,6 +41,7 @@ const HIVE_COLLECTIONS = [
 ];
 
 const HIVE_SHEET_NAME = '仕入れ判断シート';
+const HIVE_SUMMARY_SHEET_NAME = '集計サマリー';
 const HIVE_MASTER_SHEET_NAME = '検品マスター';
 // 検品マスターの実データは行3以降(行1=簡易ヘッダー, 行2=正式ヘッダー)。
 // SalesSheetSync.gs側の調査で判明済み: BRANDはCol7(G列)、ITEM NAMEはCol8(H列)。
@@ -46,9 +51,22 @@ const HIVE_MASTER_TITLE_COL = 8;
 
 const HIVE_OUTPUT_HEADERS = [
   'ブランド', '型番/アイテム名', 'カテゴリ', '素材(推定)', 'カラー(推定)',
-  '価格', 'Sold Out確認日', '未仕入れフラグ', '推定利益率(参考値・確定値ではない)',
+  '価格(HIVE表示・通貨未確認)', 'Sold Out確認日', '未仕入れフラグ',
+  'HIVE価格(JPY換算)', '仕入れ値上限(粗利20%狙い)', '仕入れ値上限(粗利30%狙い)',
   '商品ページURL', '_handle(内部キー・触らない)',
 ];
+
+// 仕入れ値上限の計算に使う前提値を置くセル。P2/P3は初期値を入れるだけで、
+// 以後はユーザーが自由に上書きしてよい(スクリプトは空でない限り再設定しない)。
+const HIVE_CONFIG_FX_LABEL_CELL = 'O1';
+const HIVE_CONFIG_FX_RATE_CELL = 'P1';
+const HIVE_CONFIG_FX_RATE_ABS = '$P$1';
+const HIVE_CONFIG_FEE_LABEL_CELL = 'O2';
+const HIVE_CONFIG_FEE_RATE_CELL = 'P2';
+const HIVE_CONFIG_FEE_RATE_ABS = '$P$2';
+const HIVE_CONFIG_SHIP_LABEL_CELL = 'O3';
+const HIVE_CONFIG_SHIP_COST_CELL = 'P3';
+const HIVE_CONFIG_SHIP_COST_ABS = '$P$3';
 
 const HIVE_MATERIAL_KEYWORDS = [
   'Leather', 'Suede', 'Canvas', 'Cotton', 'Wool', 'Silk', 'Nylon', 'Denim',
@@ -79,11 +97,12 @@ function onOpen() {
 function scanHivePreloved() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const outSheet = ensureHiveOutputSheet_(ss);
+  ensureHiveConfigCells_(outSheet);
   const masterIndex = buildHiveMasterIndex_(ss);
   const existingHandles = readHiveExistingHandles_(outSheet);
 
   const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  const rowsToAppend = [];
+  const rows = [];
   const seenInThisRun = new Set();
 
   HIVE_COLLECTIONS.forEach((col) => {
@@ -100,31 +119,44 @@ function scanHivePreloved() {
       seenInThisRun.add(p.handle);
 
       const price = p.variants && p.variants[0] ? p.variants[0].price : '';
-      const flag = computeHiveFlag_(p, masterIndex);
-      rowsToAppend.push([
-        p.vendor || '',
-        p.title || '',
-        col.label,
-        extractHiveMaterial_(p),
-        extractHiveColor_(p),
-        price,
-        today,
-        flag,
-        '20-30%(推測値・HIVE側データから確定できる数字ではない)',
-        `https://${HIVE_STORE_DOMAIN}/products/${p.handle}`,
-        p.handle,
-      ]);
+      rows.push({
+        brand: p.vendor || '',
+        title: p.title || '',
+        category: col.label,
+        material: extractHiveMaterial_(p),
+        color: extractHiveColor_(p),
+        price: price,
+        date: today,
+        flag: computeHiveFlag_(p, masterIndex),
+        url: `https://${HIVE_STORE_DOMAIN}/products/${p.handle}`,
+        handle: p.handle,
+      });
     });
   });
 
-  if (rowsToAppend.length === 0) {
+  if (rows.length === 0) {
     Logger.log('新しいSold Out商品は見つかりませんでした。');
     return;
   }
 
   const startRow = outSheet.getLastRow() + 1;
-  outSheet.getRange(startRow, 1, rowsToAppend.length, HIVE_OUTPUT_HEADERS.length)
-    .setValues(rowsToAppend);
+  const values = rows.map((r, idx) => {
+    const rowNum = startRow + idx;
+    return [
+      r.brand, r.title, r.category, r.material, r.color, r.price, r.date, r.flag,
+      // HIVE価格(JPY換算)
+      `=IF(F${rowNum}="","",F${rowNum}*${HIVE_CONFIG_FX_RATE_ABS})`,
+      // 仕入れ値上限(粗利20%狙い) = JPY価格×(1-想定手数料率-0.20) - 想定送料実費
+      `=IF(I${rowNum}="","",ROUNDDOWN(I${rowNum}*(1-${HIVE_CONFIG_FEE_RATE_ABS}-0.2)-${HIVE_CONFIG_SHIP_COST_ABS},0))`,
+      // 仕入れ値上限(粗利30%狙い)
+      `=IF(I${rowNum}="","",ROUNDDOWN(I${rowNum}*(1-${HIVE_CONFIG_FEE_RATE_ABS}-0.3)-${HIVE_CONFIG_SHIP_COST_ABS},0))`,
+      r.url,
+      r.handle,
+    ];
+  });
+
+  outSheet.getRange(startRow, 1, values.length, HIVE_OUTPUT_HEADERS.length).setValues(values);
+  ensureHiveSummarySheet_(ss);
 }
 
 function installHiveWeeklyTrigger() {
@@ -154,6 +186,24 @@ function ensureHiveOutputSheet_(ss) {
     sheet.setFrozenRows(1);
   }
   return sheet;
+}
+
+// 仕入れ値上限の計算に使う前提値。P1は常にライブレートで上書き、
+// P2/P3は空の時だけ初期値を入れる(ユーザーが調整した値は壊さない)。
+function ensureHiveConfigCells_(sheet) {
+  sheet.getRange(HIVE_CONFIG_FX_LABEL_CELL).setValue('想定為替レート(USD/JPY)').setFontWeight('bold');
+  sheet.getRange(HIVE_CONFIG_FX_RATE_CELL).setFormula('=GOOGLEFINANCE("CURRENCY:USDJPY")').setNumberFormat('0.00');
+
+  sheet.getRange(HIVE_CONFIG_FEE_LABEL_CELL).setValue('想定販売手数料率(例: eBay 14.4%)').setFontWeight('bold');
+  if (sheet.getRange(HIVE_CONFIG_FEE_RATE_CELL).getValue() === '') {
+    sheet.getRange(HIVE_CONFIG_FEE_RATE_CELL).setValue(0.144);
+  }
+  sheet.getRange(HIVE_CONFIG_FEE_RATE_CELL).setNumberFormat('0.0%');
+
+  sheet.getRange(HIVE_CONFIG_SHIP_LABEL_CELL).setValue('想定送料実費(円)').setFontWeight('bold');
+  if (sheet.getRange(HIVE_CONFIG_SHIP_COST_CELL).getValue() === '') {
+    sheet.getRange(HIVE_CONFIG_SHIP_COST_CELL).setValue(1500);
+  }
 }
 
 function readHiveExistingHandles_(sheet) {
@@ -270,4 +320,40 @@ function hiveOverlapScore_(tokensA, tokensB) {
   setA.forEach((t) => { if (setB.has(t)) intersection++; });
   const union = new Set([...setA, ...setB]).size;
   return union === 0 ? 0 : intersection / union;
+}
+
+// 仕入れ判断シートの蓄積データから、ブランド×素材／ブランド×カラー／ブランド単体で
+// Sold Out件数と平均価格・平均仕入れ上限額を集計するタブ。データが増えるほど
+// 「このブランドはこの素材/色がよく売れる」という傾向が見えてくる想定。
+function ensureHiveSummarySheet_(ss) {
+  let sheet = ss.getSheetByName(HIVE_SUMMARY_SHEET_NAME);
+  if (!sheet) sheet = ss.insertSheet(HIVE_SUMMARY_SHEET_NAME);
+
+  const countLabel = "count(A) '件数'";
+  const avgLabels = "avg(I) '平均HIVE価格(JPY)', avg(J) '平均仕入上限(粗利20%)'";
+
+  sheet.getRange('A1').setValue('ブランド×素材 別 Sold Out集計').setFontWeight('bold');
+  sheet.getRange('A2').setFormula(
+    `=IFERROR(QUERY('${HIVE_SHEET_NAME}'!A2:K, "select A, D, count(A), avg(I), avg(J) ` +
+    `where A is not null and D is not null and D <> '' group by A, D order by count(A) desc ` +
+    `label ${countLabel}, ${avgLabels}", 0), "データがまだありません")`
+  );
+
+  sheet.getRange('G1').setValue('ブランド×カラー 別 Sold Out集計').setFontWeight('bold');
+  sheet.getRange('G2').setFormula(
+    `=IFERROR(QUERY('${HIVE_SHEET_NAME}'!A2:K, "select A, E, count(A), avg(I), avg(J) ` +
+    `where A is not null and E is not null and E <> '' group by A, E order by count(A) desc ` +
+    `label ${countLabel}, ${avgLabels}", 0), "データがまだありません")`
+  );
+
+  sheet.getRange('M1').setValue('ブランド 別 Sold Out集計').setFontWeight('bold');
+  sheet.getRange('M2').setFormula(
+    `=IFERROR(QUERY('${HIVE_SHEET_NAME}'!A2:K, "select A, count(A), avg(I), avg(J) ` +
+    `where A is not null group by A order by count(A) desc ` +
+    `label ${countLabel}, ${avgLabels}", 0), "データがまだありません")`
+  );
+
+  sheet.getRange('C3:E500').setNumberFormat('#,##0');
+  sheet.getRange('I3:K500').setNumberFormat('#,##0');
+  sheet.getRange('N3:P500').setNumberFormat('#,##0');
 }
