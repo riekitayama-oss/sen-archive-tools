@@ -115,7 +115,7 @@ function applyFormulaColumns_(sheet) {
   const col = (name) => NEW_HEADERS.indexOf(name) + 1;
 
   sheet.getRange(2, col('滞留日数')).setFormula(
-    '=ARRAYFORMULA(IF($A2:A="","",IF($E2:E="",TODAY()-$C2:C,$E2:E-$C2:C)))'
+    '=ARRAYFORMULA(IF($A2:A="","",IF($C2:C="","",IF($E2:E="",TODAY()-$C2:C,$E2:E-$C2:C))))'
   );
   sheet.getRange(2, col('Transaction fee')).setFormula(
     '=ARRAYFORMULA(IF($A2:A="","",IF($D2:D="Mercari",$F2:F*0.1,IF($D2:D="eBay",$F2:F*0.144,""))))'
