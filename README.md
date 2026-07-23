@@ -55,28 +55,49 @@
 
 | 列 | 項目 | 入力方法 |
 |---|---|---|
-| A | SKU | 自動（検品マスターから） |
-| B | Item Name | 自動（検品マスターから） |
-| C | 出品日 | 自動（検品マスターから・編集不可の警告つき保護あり） |
-| D | Channel | 手入力 |
-| E | 販売日 | 手入力 |
-| F | 販売価格 | 手入力 |
+| A | SKU | 自動（検品マスターから。一度書き込んだ行は固定され、新しいSKUは末尾に追記される） |
+| B | Item Name | 自動（A列のSKUでR:T参照テーブルをVLOOKUP） |
+| C | 出品日 | 自動（同上・編集不可の警告つき保護あり） |
+| D | Channel | 手入力（`eBay`/`Mercari`/`Shopify`/`VC`のプルダウン） |
+| E | 販売日 | 手入力（実際の日付として入力する。例: `2026/7/2`） |
+| F | 販売価格 | 手入力（Channelの通貨建てのまま。eBay/Shopify/VCはUSD、MercariはJPY） |
 | G | 滞留日数 | 自動計算 |
 | H | Transaction fee | 自動計算 |
 | I | Ad Fee | 手入力 |
 | J | 値引き額(クーポン等) | 手入力 |
-| K | 送料実費 | 手入力（都度異なるため自動化しない） |
-| L | Order earnings | 自動計算 |
-| M | 仕入れ値 | 手入力 |
-| N | 実質粗利 | 自動計算 |
+| K | 送料実費 | 手入力（JPY。都度異なるため自動化しない） |
+| L | Order earnings | 自動計算（F列と同じ通貨） |
+| M | 仕入れ値 | 手入力（JPY） |
+| N | 実質粗利 | 自動計算（JPY。1円未満切り捨て） |
 | O | 粗利率 | 自動計算 |
+| P1/P2 | USD/JPYレート | 自動（GOOGLEFINANCEのライブレート） |
+| R:T | 検品マスター参照テーブル(内部用) | 自動。触らない |
+
+### SKU行が固定される仕組み
+
+以前のバージョンはA2に置いた1つのQUERY数式がA:C列全体にspillする設計だったため、
+検品マスター側で行の削除・並べ替えが起きると、下の行が全部ズレて既存の手入力データが
+別のSKUに紐付いてしまう問題があった。
+
+現在はSKU(A列)を「一度書いたら動かさない」プレーンな値として管理し、検品マスターに新しい
+SKUが増えたときだけ末尾に追記する。Item Name(B列)・出品日(C列)は自分の行のSKUをキーに
+R:T列の参照テーブルへVLOOKUPするため、検品マスターの行順が変わっても既存行のSKUとの
+対応関係は崩れない。
+
+## 為替（USD/JPY）の扱い
+
+- eBay・Shopify・VCの売上（販売価格・Order earnings）はUSD建て、Mercariの売上はJPY建てで入力する
+- P1に「USD/JPY」ラベル、P2にGOOGLEFINANCEのライブレートが自動で入る（都度の実際のレートとは
+  ズレる可能性がある概算値）
+- 実質粗利・粗利率は、ChannelがMercari以外の行だけP2のレートを掛けてJPYに揃えてから
+  JPY建ての送料実費・仕入れ値と差し引きする。Mercariの行は元々JPYなので為替換算しない
 
 ## 計算式（すべてARRAYFORMULAで自動的に行を追従）
 
-- 滞留日数: `IF(販売日="", TODAY()-出品日, 販売日-出品日)`
+- 滞留日数: `IF(出品日="", "", IF(販売日="", TODAY()-出品日, 販売日-出品日))`
 - Transaction fee: `IF(Channel="Mercari", 販売価格*0.1, IF(Channel="eBay", 販売価格*0.144, ""))`
   - Shopify/VCは手数料率が未確定のため空欄のまま。判明次第 `SalesSheetSync.gs` の
     `applyFormulaColumns_` 内のIF文に追加する
 - Order earnings: `販売価格 - Transaction fee - Ad Fee - 値引き額`
-- 実質粗利: `Order earnings - 送料実費 - 仕入れ値`
-- 粗利率: `実質粗利 / 販売価格`
+- 実質粗利: `ROUNDDOWN(IF(Channel="Mercari", Order earnings-送料実費-仕入れ値, Order earnings×USD/JPYレート-送料実費-仕入れ値), 0)`
+- 粗利率: `実質粗利 / (Channel="Mercari" ? 販売価格 : 販売価格×USD/JPYレート)`
