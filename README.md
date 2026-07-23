@@ -5,6 +5,7 @@
 ## ファイル
 
 - `apps-script/SalesSheetSync.gs` — 売上シートにセットする Google Apps Script
+- `apps-script/HivePrelovedScan.gs` — 検品マスターにセットする、HIVE PRELOVED週次調査用 Google Apps Script（詳細は下部「HIVE PRELOVED週次調査」参照）
 
 ## 使い方
 
@@ -101,3 +102,52 @@ R:T列の参照テーブルへVLOOKUPするため、検品マスターの行順�
 - Order earnings: `販売価格 - Transaction fee - Ad Fee - 値引き額`
 - 実質粗利: `ROUNDDOWN(IF(Channel="Mercari", Order earnings-送料実費-仕入れ値, Order earnings×USD/JPYレート-送料実費-仕入れ値), 0)`
 - 粗利率: `実質粗利 / (Channel="Mercari" ? 販売価格 : 販売価格×USD/JPYレート)`
+
+## HIVE PRELOVED週次調査
+
+HIVE PRELOVED (hivepreloved.com) のShopifyストアを週次で調査し、Sold Outになった商品を
+検品マスターのBRAND/ITEM NAME列と突き合わせて、SENでまだ扱っていなさそうなブランド・
+デザインを検品マスターの新規タブ「仕入れ判断シート」にリストアップするツール。
+
+### 前提と制限（要検証）
+
+このツールを作った環境からはネットワークポリシーによりHIVE PRELOVEDのページを
+実際に開いて確認することができなかった。そのため、Shopifyストアが一般的に公開している
+`/collections/{handle}/products.json` エンドポイントが使える前提でコードを書いており、
+以下は未検証の推測が含まれる。**初回実行後、実際の出力を見て調整すること。**
+
+- `HIVE_COLLECTIONS`のhandle（`bags`/`shoes`）: 実際に `https://hivepreloved.com/collections/bags`
+  のようなURLをブラウザで開いて、正しいhandleか確認する
+- ブランド名は`vendor`フィールドから取得する前提。HIVE側で店名などが入っている場合は
+  `HivePrelovedScan.gs`のロジックを調整する必要がある
+- 素材・カラーはShopifyの標準フィールドではないため、タグやタイトルからキーワードで
+  推測しているだけ(`HIVE_MATERIAL_KEYWORDS`/`HIVE_COLOR_KEYWORDS`で調整可能)
+- 価格の通貨は未確認
+
+### 使い方
+
+1. [検品マスター](https://docs.google.com/spreadsheets/d/166BARD0R6QVWFO7uwBQvnZsvmntC9W362UmVdXSXa0Y) を開く
+2. 拡張機能 > Apps Script（売上シート用とは別のスクリプトプロジェクトになる）
+3. `apps-script/HivePrelovedScan.gs` の内容を貼り付けて保存
+4. `scanHivePreloved` を一度手動実行し、新規タブ「仕入れ判断シート」に出力された内容を確認する
+5. 問題なければスプレッドシートのメニュー「HIVE PRELOVED調査 > 週次自動実行を設定」を実行
+   （毎週月曜朝に自動実行されるようになる。以後はメニューの「今すぐ調査を実行」でいつでも
+   手動実行も可能）
+
+### 「未仕入れフラグ」の考え方
+
+検品マスターとHIVE PRELOVED側には型番のような構造化された共通キーが無いため、
+以下の目安で判定している（最終判断は人間の確認が必要）:
+
+1. 検品マスターにそのブランド自体の取り扱いが無ければ「未仕入れ(ブランド自体が無い)」
+2. ブランドはあるが、商品名の単語一致率（Jaccard係数）が閾値未満なら
+   「未仕入れ(類似デザインが見当たらない)」
+3. 閾値以上の一致があれば「取扱いあり」
+
+「Sold Out確認日」は商品ごとに初めて検出した日付を保持し、2回目以降の実行では
+同じ商品(`handle`で識別)を重複して追加しない。
+
+### 推定利益率について
+
+「推定利益率(参考値)」列には固定で `20-30%(推測値・HIVE側データから確定できる数字ではない)`
+と書き出している。これはHIVE側の販売データから計算した数値ではなく、あくまで参考の目安。
