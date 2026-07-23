@@ -74,6 +74,7 @@ function setupSalesSheet() {
     sheet.setFrozenRows(1);
   } else {
     detachOldQuerySpill_(sheet);
+    detachOldArrayFormulaColumns_(sheet);
   }
 
   refreshHelperTable_(sheet);
@@ -127,6 +128,22 @@ function detachOldQuerySpill_(sheet) {
   sheet.getRange('A2').clearContent();
   SpreadsheetApp.flush();
   sheet.getRange(2, 1, skuValues.length, 1).setValues(skuValues);
+}
+
+// 旧バージョン(B/C/G/H/L/N/Oの各列にARRAYFORMULAを1つだけ置いてspillさせていた設計)からの移行:
+// スピルされた非アンカー行はgetFormula()が空文字を返すため、手入力と区別がつかず
+// applyFormulaColumns_に「手入力だから触らない」と誤認識されてしまう。
+// そうなる前に、ARRAYFORMULAが残っているアンカーセル(2行目)だけを消して
+// スピルを解除し、まっさらな状態にしてから新しい行ごとの数式を適用する。
+function detachOldArrayFormulaColumns_(sheet) {
+  AUTO_FORMULA_COLUMNS.forEach((name) => {
+    const c = NEW_HEADERS.indexOf(name) + 1;
+    const anchor = sheet.getRange(2, c);
+    const f = anchor.getFormula();
+    if (f && f.toUpperCase().indexOf('ARRAYFORMULA') !== -1) {
+      anchor.clearContent();
+    }
+  });
 }
 
 function refreshHelperTable_(sheet) {
