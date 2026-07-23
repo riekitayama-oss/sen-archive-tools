@@ -36,6 +36,12 @@ const MANUAL_FIELDS = [
 
 const CHANNEL_OPTIONS = ['eBay', 'Mercari', 'Shopify', 'VC'];
 
+// USD建ての Order earnings / 販売価格 をJPYの送料実費・仕入れ値と合算するための為替レート。
+// P1にラベル、P2にGOOGLEFINANCEのライブレートを置き、各行の計算式から$P$2として参照する。
+const FX_LABEL_CELL = 'P1';
+const FX_RATE_CELL = 'P2';
+const FX_RATE_ABS = '$P$2';
+
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('SEN ARCHIVE')
@@ -69,6 +75,7 @@ function setupSalesSheet() {
   const numRows = lastRow - 1;
 
   restoreManualData_(sheet, numRows, preserved);
+  applyFxRateCell_(sheet);
   applyFormulaColumns_(sheet);
   applyFormatting_(sheet, numRows);
   applyChannelValidation_(sheet, numRows);
@@ -127,11 +134,16 @@ function applyFormulaColumns_(sheet) {
     '=ARRAYFORMULA(IF($A2:A="","",$F2:F-$H2:H-$I2:I-$J2:J))'
   );
   sheet.getRange(2, col('実質粗利')).setFormula(
-    '=ARRAYFORMULA(IF($A2:A="","",$L2:L-$K2:K-$M2:M))'
+    `=ARRAYFORMULA(IF($A2:A="","",($L2:L*${FX_RATE_ABS})-$K2:K-$M2:M))`
   );
   sheet.getRange(2, col('粗利率')).setFormula(
-    '=ARRAYFORMULA(IF($A2:A="","",IF($F2:F="","",$N2:N/$F2:F)))'
+    `=ARRAYFORMULA(IF($A2:A="","",IF($F2:F="","",$N2:N/($F2:F*${FX_RATE_ABS}))))`
   );
+}
+
+function applyFxRateCell_(sheet) {
+  sheet.getRange(FX_LABEL_CELL).setValue('USD/JPY').setFontWeight('bold');
+  sheet.getRange(FX_RATE_CELL).setFormula('=GOOGLEFINANCE("CURRENCY:USDJPY")').setNumberFormat('0.00');
 }
 
 function applyFormatting_(sheet, numRows) {
