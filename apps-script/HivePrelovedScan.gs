@@ -426,11 +426,20 @@ function ensureHiveSummarySheet_(ss) {
   );
 
   // ブランドを問わず、同じカテゴリ(コレクション)内でどの色が高値か。
-  // 件数順ではなく平均価格が高い順に並べる。
-  sheet.getRange('AI1').setValue('カテゴリ×カラー 別 平均価格ランキング(ブランド問わず)').setFontWeight('bold');
+  // 件数順ではなく平均価格が高い順に並べる。「高く売れる色」を見る用。
+  sheet.getRange('AI1').setValue('カテゴリ×カラー 別 平均価格ランキング(ブランド問わず・高い順)').setFontWeight('bold');
   sheet.getRange('AI2').setFormula(
     `=IFERROR(QUERY(${range}, "select C, E, count(A), avg(K) ` +
     `where E is not null and E <> '' group by C, E order by avg(K) desc ` +
+    `label count(A) '件数', avg(K) '平均HIVE価格(JPY)'", 0), "データがまだありません")`
+  );
+
+  // 上のブロックは「高く売れる色」。こちらはSold Out件数(=売れやすさの代理指標)が
+  // 多い順に並べた「売れやすい色」。同じ色でも高値と売れやすさは別の軸になりうる。
+  sheet.getRange('AN1').setValue('カテゴリ×カラー 別 Sold Out件数ランキング(ブランド問わず・売れやすい順)').setFontWeight('bold');
+  sheet.getRange('AN2').setFormula(
+    `=IFERROR(QUERY(${range}, "select C, E, count(A), avg(K) ` +
+    `where E is not null and E <> '' group by C, E order by count(A) desc ` +
     `label count(A) '件数', avg(K) '平均HIVE価格(JPY)'", 0), "データがまだありません")`
   );
 
@@ -440,4 +449,5 @@ function ensureHiveSummarySheet_(ss) {
   sheet.getRange('Y3:Z500').setNumberFormat('#,##0');
   sheet.getRange('AE3:AG500').setNumberFormat('#,##0');
   sheet.getRange('AK3:AL500').setNumberFormat('#,##0');
+  sheet.getRange('AP3:AQ500').setNumberFormat('#,##0');
 }
