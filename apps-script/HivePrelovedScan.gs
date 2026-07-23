@@ -118,6 +118,11 @@ const HIVE_STOPWORDS = new Set([
 // 検品マスターに無い」とみなす。0〜1の値で、低いほどフラグが立ちやすくなる。
 const HIVE_SIMILARITY_THRESHOLD = 0.3;
 
+// 集計サマリーで見る期間(日数)。全期間の蓄積ではなく直近のトレンドを見たいため、
+// Sold Out確認日(I列)がこの日数以内の行だけを集計対象にする。TODAY()基準で
+// 毎日自動的にスライドするので、来月・半年後もずっと「直近2ヶ月」を保ち続ける。
+const HIVE_SUMMARY_WINDOW_DAYS = 60;
+
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('HIVE PRELOVED調査')
@@ -386,60 +391,63 @@ function ensureHiveSummarySheet_(ss) {
   const countLabel = "count(A) '件数'";
   const avgLabels = "avg(K) '平均HIVE価格(JPY)', avg(L) '平均仕入上限(粗利20%)'";
   const range = `'${HIVE_SHEET_NAME}'!A2:M`;
+  // Sold Out確認日(I列)がこの日数より前のものは除外する。TEXT(TODAY()-N,...)を
+  // 数式内で"&"連結することで、シートを開くたびに自動的に直近N日にスライドする。
+  const windowClause = `and I >= date '"&TEXT(TODAY()-${HIVE_SUMMARY_WINDOW_DAYS},"yyyy-mm-dd")&"' `;
 
-  sheet.getRange('A1').setValue('ブランド×カテゴリ×型番タグ 別 Sold Out集計').setFontWeight('bold');
+  sheet.getRange('A1').setValue(`ブランド×カテゴリ×型番タグ 別 Sold Out集計(直近${HIVE_SUMMARY_WINDOW_DAYS}日)`).setFontWeight('bold');
   sheet.getRange('A2').setFormula(
     `=IFERROR(QUERY(${range}, "select A, C, G, count(A), avg(K), avg(L) ` +
-    `where A is not null and G is not null and G <> '' group by A, C, G order by count(A) desc ` +
+    `where A is not null and G is not null and G <> '' ${windowClause}group by A, C, G order by count(A) desc ` +
     `label ${countLabel}, ${avgLabels}", 0), "データがまだありません")`
   );
 
-  sheet.getRange('H1').setValue('ブランド×カテゴリ×素材 別 Sold Out集計').setFontWeight('bold');
+  sheet.getRange('H1').setValue(`ブランド×カテゴリ×素材 別 Sold Out集計(直近${HIVE_SUMMARY_WINDOW_DAYS}日)`).setFontWeight('bold');
   sheet.getRange('H2').setFormula(
     `=IFERROR(QUERY(${range}, "select A, C, D, count(A), avg(K), avg(L) ` +
-    `where A is not null and D is not null and D <> '' group by A, C, D order by count(A) desc ` +
+    `where A is not null and D is not null and D <> '' ${windowClause}group by A, C, D order by count(A) desc ` +
     `label ${countLabel}, ${avgLabels}", 0), "データがまだありません")`
   );
 
-  sheet.getRange('O1').setValue('ブランド×カテゴリ×カラー 別 Sold Out集計').setFontWeight('bold');
+  sheet.getRange('O1').setValue(`ブランド×カテゴリ×カラー 別 Sold Out集計(直近${HIVE_SUMMARY_WINDOW_DAYS}日)`).setFontWeight('bold');
   sheet.getRange('O2').setFormula(
     `=IFERROR(QUERY(${range}, "select A, C, E, count(A), avg(K), avg(L) ` +
-    `where A is not null and E is not null and E <> '' group by A, C, E order by count(A) desc ` +
+    `where A is not null and E is not null and E <> '' ${windowClause}group by A, C, E order by count(A) desc ` +
     `label ${countLabel}, ${avgLabels}", 0), "データがまだありません")`
   );
 
-  sheet.getRange('V1').setValue('ブランド×カテゴリ 別 Sold Out集計').setFontWeight('bold');
+  sheet.getRange('V1').setValue(`ブランド×カテゴリ 別 Sold Out集計(直近${HIVE_SUMMARY_WINDOW_DAYS}日)`).setFontWeight('bold');
   sheet.getRange('V2').setFormula(
     `=IFERROR(QUERY(${range}, "select A, C, count(A), avg(K), avg(L) ` +
-    `where A is not null group by A, C order by count(A) desc ` +
+    `where A is not null ${windowClause}group by A, C order by count(A) desc ` +
     `label ${countLabel}, ${avgLabels}", 0), "データがまだありません")`
   );
 
   // "FENDI Baguette" のようにライン単体でいくつ売れて相場がいくらかを見る集計。
   // これと上のブランド×カテゴリ×型番タグを見比べると、ラインの中でどの柄/素材が
   // 相場を押し上げている(または下げている)かが分かる。
-  sheet.getRange('AB1').setValue('ブランド×カテゴリ×ライン 別 Sold Out集計(柄/素材を含まない)').setFontWeight('bold');
+  sheet.getRange('AB1').setValue(`ブランド×カテゴリ×ライン 別 Sold Out集計・柄/素材を含まない(直近${HIVE_SUMMARY_WINDOW_DAYS}日)`).setFontWeight('bold');
   sheet.getRange('AB2').setFormula(
     `=IFERROR(QUERY(${range}, "select A, C, F, count(A), avg(K), avg(L) ` +
-    `where A is not null and F is not null and F <> '' group by A, C, F order by count(A) desc ` +
+    `where A is not null and F is not null and F <> '' ${windowClause}group by A, C, F order by count(A) desc ` +
     `label ${countLabel}, ${avgLabels}", 0), "データがまだありません")`
   );
 
   // ブランドを問わず、同じカテゴリ(コレクション)内でどの色が高値か。
   // 件数順ではなく平均価格が高い順に並べる。「高く売れる色」を見る用。
-  sheet.getRange('AI1').setValue('カテゴリ×カラー 別 平均価格ランキング(ブランド問わず・高い順)').setFontWeight('bold');
+  sheet.getRange('AI1').setValue(`カテゴリ×カラー 別 平均価格ランキング・ブランド問わず・高い順(直近${HIVE_SUMMARY_WINDOW_DAYS}日)`).setFontWeight('bold');
   sheet.getRange('AI2').setFormula(
     `=IFERROR(QUERY(${range}, "select C, E, count(A), avg(K) ` +
-    `where E is not null and E <> '' group by C, E order by avg(K) desc ` +
+    `where E is not null and E <> '' ${windowClause}group by C, E order by avg(K) desc ` +
     `label count(A) '件数', avg(K) '平均HIVE価格(JPY)'", 0), "データがまだありません")`
   );
 
   // 上のブロックは「高く売れる色」。こちらはSold Out件数(=売れやすさの代理指標)が
   // 多い順に並べた「売れやすい色」。同じ色でも高値と売れやすさは別の軸になりうる。
-  sheet.getRange('AN1').setValue('カテゴリ×カラー 別 Sold Out件数ランキング(ブランド問わず・売れやすい順)').setFontWeight('bold');
+  sheet.getRange('AN1').setValue(`カテゴリ×カラー 別 Sold Out件数ランキング・ブランド問わず・売れやすい順(直近${HIVE_SUMMARY_WINDOW_DAYS}日)`).setFontWeight('bold');
   sheet.getRange('AN2').setFormula(
     `=IFERROR(QUERY(${range}, "select C, E, count(A), avg(K) ` +
-    `where E is not null and E <> '' group by C, E order by count(A) desc ` +
+    `where E is not null and E <> '' ${windowClause}group by C, E order by count(A) desc ` +
     `label count(A) '件数', avg(K) '平均HIVE価格(JPY)'", 0), "データがまだありません")`
   );
 
