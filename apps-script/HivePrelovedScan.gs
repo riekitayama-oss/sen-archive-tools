@@ -9,8 +9,8 @@
  *   - COLLECTIONS の handle (URLの一部。実際にブラウザで
  *     https://hivepreloved.com/collections/bags を開いて確認・修正すること)
  *   - ブランド = product.vendor という前提(店名が入っていた場合は要修正)
- *   - 素材・カラーは tags/title からキーワード一致で推測しているだけで、
- *     専用フィールドではない(MATERIAL_KEYWORDS / COLOR_KEYWORDSで調整)
+ *   - 素材・カラー・ライン名・柄名は tags/title からキーワード一致で推測しているだけで、
+ *     専用フィールドではない(HIVE_MATERIAL_KEYWORDS等の各リストで調整)
  *   - 価格の通貨は未確認(variants[].priceをそのまま数値化しているだけ)
  *
  * 使い方:
@@ -29,6 +29,12 @@
  * 確保するにはいくら以下で仕入れる必要があるか」という参考の目安。想定手数料率・
  * 想定送料実費は仕入れ判断シートのP2/P3セルで調整できる(初期値: eBay手数料14.4%、
  * 送料1500円)。
+ *
+ * 「型番タグ」について: "FENDI Baguette Zucca" と "FENDI Baguette Leopard" を
+ * 別物として集計したい、という要望に対応するため、既知のライン名(Baguette,
+ * Speedy等)と柄名(Zucca, Monogram, Leopard等)をタイトルから検出し、
+ * 「ライン名+柄/素材」の組み合わせをタグとして作る。HIVE_KNOWN_LINES /
+ * HIVE_PATTERN_KEYWORDS は網羅的ではないので、集計結果を見ながら追加すること。
  */
 
 const HIVE_STORE_DOMAIN = 'hivepreloved.com';
@@ -51,6 +57,7 @@ const HIVE_MASTER_TITLE_COL = 8;
 
 const HIVE_OUTPUT_HEADERS = [
   'ブランド', '型番/アイテム名', 'カテゴリ', '素材(推定)', 'カラー(推定)',
+  '型番タグ(ライン+柄/素材・推定)',
   '価格(HIVE表示・通貨未確認)', 'Sold Out確認日', '未仕入れフラグ',
   'HIVE価格(JPY換算)', '仕入れ値上限(粗利20%狙い)', '仕入れ値上限(粗利30%狙い)',
   '商品ページURL', '_handle(内部キー・触らない)',
@@ -77,6 +84,29 @@ const HIVE_COLOR_KEYWORDS = [
   'Grey', 'Gray', 'Navy', 'Gold', 'Silver', 'Purple', 'Orange', 'Tan', 'Cream',
   'Multicolor', 'Ivory', 'Khaki',
 ];
+
+// 柄・モノグラム名。素材ではないが、同じ素材でも柄違いで人気が大きく変わることが
+// 多いブランド品では重要な区別軸(例: FENDIのZucca vs Leopard)。
+const HIVE_PATTERN_KEYWORDS = [
+  'Zucca', 'Monogram', 'Damier', 'GG', 'Toile', 'Python', 'Snake', 'Croc',
+  'Crocodile', 'Leopard', 'Cheetah', 'Zebra', 'Houndstooth', 'Tie-Dye',
+  'Ombre', 'Sequin', 'Metallic', 'Quilted', 'Chevron', 'Herringbone',
+  'Tartan', 'Plaid',
+];
+
+// 主要ブランドの代表的なライン名(非網羅的・要追加)。"FENDI Baguette Zucca" の
+// ように、ブランド名の直後に来ることが多い型番/ライン名をタイトルから検出する。
+const HIVE_KNOWN_LINES = [
+  'Baguette', 'Peekaboo', 'Mon Tresor', // Fendi
+  'Speedy', 'Neverfull', 'Alma', 'Keepall', 'Twist', 'Capucines', 'Petite Malle', // Louis Vuitton
+  'Classic Flap', 'Boy', '2.55', '19 Bag', 'Coco Handle', // Chanel
+  'Kelly', 'Birkin', 'Constance', 'Evelyne', 'Picotin', 'Garden Party', // Hermes
+  'Lady Dior', 'Saddle', 'Book Tote', 'Caro', // Dior
+  'GG Marmont', 'Dionysus', 'Jackie', 'Soho', 'Sylvie', // Gucci
+  'Antigona', 'Nightingale', // Givenchy
+  'Trapeze', 'Bayswater', // Mulberry
+];
+
 const HIVE_STOPWORDS = new Set([
   'the', 'and', 'with', 'for', 'of', 'in', 'a', 'an', 'size', 'us', 'eu', 'cm',
   'new', 'preloved', 'pre-owned', 'vintage',
@@ -125,6 +155,7 @@ function scanHivePreloved() {
         category: col.label,
         material: extractHiveMaterial_(p),
         color: extractHiveColor_(p),
+        tag: extractHiveTag_(p),
         price: price,
         date: today,
         flag: computeHiveFlag_(p, masterIndex),
@@ -143,13 +174,13 @@ function scanHivePreloved() {
   const values = rows.map((r, idx) => {
     const rowNum = startRow + idx;
     return [
-      r.brand, r.title, r.category, r.material, r.color, r.price, r.date, r.flag,
-      // HIVE価格(JPY換算)
-      `=IF(F${rowNum}="","",F${rowNum}*${HIVE_CONFIG_FX_RATE_ABS})`,
+      r.brand, r.title, r.category, r.material, r.color, r.tag, r.price, r.date, r.flag,
+      // HIVE価格(JPY換算) : G列(価格)
+      `=IF(G${rowNum}="","",G${rowNum}*${HIVE_CONFIG_FX_RATE_ABS})`,
       // 仕入れ値上限(粗利20%狙い) = JPY価格×(1-想定手数料率-0.20) - 想定送料実費
-      `=IF(I${rowNum}="","",ROUNDDOWN(I${rowNum}*(1-${HIVE_CONFIG_FEE_RATE_ABS}-0.2)-${HIVE_CONFIG_SHIP_COST_ABS},0))`,
+      `=IF(J${rowNum}="","",ROUNDDOWN(J${rowNum}*(1-${HIVE_CONFIG_FEE_RATE_ABS}-0.2)-${HIVE_CONFIG_SHIP_COST_ABS},0))`,
       // 仕入れ値上限(粗利30%狙い)
-      `=IF(I${rowNum}="","",ROUNDDOWN(I${rowNum}*(1-${HIVE_CONFIG_FEE_RATE_ABS}-0.3)-${HIVE_CONFIG_SHIP_COST_ABS},0))`,
+      `=IF(J${rowNum}="","",ROUNDDOWN(J${rowNum}*(1-${HIVE_CONFIG_FEE_RATE_ABS}-0.3)-${HIVE_CONFIG_SHIP_COST_ABS},0))`,
       r.url,
       r.handle,
     ];
@@ -277,6 +308,19 @@ function extractHiveColor_(product) {
   return findHiveKeyword_(product, HIVE_COLOR_KEYWORDS);
 }
 
+// "ライン名 + 柄/素材" の組み合わせタグを作る(例: "Baguette Zucca",
+// "Baguette Leopard", "Baguette Wool")。柄名が見つからない時は素材名、
+// それも無ければ色名にフォールバックする。ラインが見つからない場合は
+// 柄/素材/色だけのタグになる。
+function extractHiveTag_(product) {
+  const line = findHiveKeyword_(product, HIVE_KNOWN_LINES);
+  const modifier =
+    findHiveKeyword_(product, HIVE_PATTERN_KEYWORDS) ||
+    findHiveKeyword_(product, HIVE_MATERIAL_KEYWORDS) ||
+    findHiveKeyword_(product, HIVE_COLOR_KEYWORDS);
+  return [line, modifier].filter(Boolean).join(' ');
+}
+
 function findHiveKeyword_(product, keywords) {
   const haystack = [
     (product.tags || []).join(' '),
@@ -322,41 +366,50 @@ function hiveOverlapScore_(tokensA, tokensB) {
   return union === 0 ? 0 : intersection / union;
 }
 
-// 仕入れ判断シートの蓄積データから、ブランド×素材／ブランド×カラー／ブランド単体で
-// Sold Out件数と平均価格・平均仕入れ上限額を集計するタブ。データが増えるほど
-// 「このブランドはこの素材/色がよく売れる」という傾向が見えてくる想定。
+// 仕入れ判断シートの蓄積データから、ブランド×カテゴリ×型番タグ／素材／カラー、
+// および ブランド×カテゴリ単体で Sold Out件数と平均価格・平均仕入れ上限額を
+// 集計するタブ。データが増えるほど「このライン+柄はよく売れる」といった
+// 傾向が見えてくる想定。
 function ensureHiveSummarySheet_(ss) {
   let sheet = ss.getSheetByName(HIVE_SUMMARY_SHEET_NAME);
   if (!sheet) sheet = ss.insertSheet(HIVE_SUMMARY_SHEET_NAME);
 
   const countLabel = "count(A) '件数'";
-  const avgLabels = "avg(I) '平均HIVE価格(JPY)', avg(J) '平均仕入上限(粗利20%)'";
+  const avgLabels = "avg(J) '平均HIVE価格(JPY)', avg(K) '平均仕入上限(粗利20%)'";
+  const range = `'${HIVE_SHEET_NAME}'!A2:L`;
 
-  // カテゴリ(Bags/Shoesなど)を含めずにブランド×素材だけで集計すると、
-  // 「バッグはよく売れるが同じ素材の靴は売れない」といった違いが潰れてしまい
-  // 仕入れ判断の役に立たないため、カテゴリ(C列)を常にグルーピングに含める。
-  sheet.getRange('A1').setValue('ブランド×カテゴリ×素材 別 Sold Out集計').setFontWeight('bold');
+  // 最優先: FENDI Baguette Zucca / Leopard / Wool のように、ライン+柄/素材の
+  // 組み合わせ単位で見たいという要望に応える集計。
+  sheet.getRange('A1').setValue('ブランド×カテゴリ×型番タグ 別 Sold Out集計').setFontWeight('bold');
   sheet.getRange('A2').setFormula(
-    `=IFERROR(QUERY('${HIVE_SHEET_NAME}'!A2:K, "select A, C, D, count(A), avg(I), avg(J) ` +
+    `=IFERROR(QUERY(${range}, "select A, C, F, count(A), avg(J), avg(K) ` +
+    `where A is not null and F is not null and F <> '' group by A, C, F order by count(A) desc ` +
+    `label ${countLabel}, ${avgLabels}", 0), "データがまだありません")`
+  );
+
+  sheet.getRange('H1').setValue('ブランド×カテゴリ×素材 別 Sold Out集計').setFontWeight('bold');
+  sheet.getRange('H2').setFormula(
+    `=IFERROR(QUERY(${range}, "select A, C, D, count(A), avg(J), avg(K) ` +
     `where A is not null and D is not null and D <> '' group by A, C, D order by count(A) desc ` +
     `label ${countLabel}, ${avgLabels}", 0), "データがまだありません")`
   );
 
-  sheet.getRange('H1').setValue('ブランド×カテゴリ×カラー 別 Sold Out集計').setFontWeight('bold');
-  sheet.getRange('H2').setFormula(
-    `=IFERROR(QUERY('${HIVE_SHEET_NAME}'!A2:K, "select A, C, E, count(A), avg(I), avg(J) ` +
+  sheet.getRange('O1').setValue('ブランド×カテゴリ×カラー 別 Sold Out集計').setFontWeight('bold');
+  sheet.getRange('O2').setFormula(
+    `=IFERROR(QUERY(${range}, "select A, C, E, count(A), avg(J), avg(K) ` +
     `where A is not null and E is not null and E <> '' group by A, C, E order by count(A) desc ` +
     `label ${countLabel}, ${avgLabels}", 0), "データがまだありません")`
   );
 
-  sheet.getRange('O1').setValue('ブランド×カテゴリ 別 Sold Out集計').setFontWeight('bold');
-  sheet.getRange('O2').setFormula(
-    `=IFERROR(QUERY('${HIVE_SHEET_NAME}'!A2:K, "select A, C, count(A), avg(I), avg(J) ` +
+  sheet.getRange('V1').setValue('ブランド×カテゴリ 別 Sold Out集計').setFontWeight('bold');
+  sheet.getRange('V2').setFormula(
+    `=IFERROR(QUERY(${range}, "select A, C, count(A), avg(J), avg(K) ` +
     `where A is not null group by A, C order by count(A) desc ` +
     `label ${countLabel}, ${avgLabels}", 0), "データがまだありません")`
   );
 
   sheet.getRange('D3:F500').setNumberFormat('#,##0');
   sheet.getRange('K3:M500').setNumberFormat('#,##0');
-  sheet.getRange('Q3:S500').setNumberFormat('#,##0');
+  sheet.getRange('R3:T500').setNumberFormat('#,##0');
+  sheet.getRange('Y3:Z500').setNumberFormat('#,##0');
 }
