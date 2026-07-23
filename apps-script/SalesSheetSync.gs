@@ -133,11 +133,13 @@ function applyFormulaColumns_(sheet) {
   sheet.getRange(2, col('Order earnings')).setFormula(
     '=ARRAYFORMULA(IF($A2:A="","",$F2:F-$H2:H-$I2:I-$J2:J))'
   );
+  // Mercariは販売価格・Order earningsが元々JPYなので為替換算せず、
+  // eBay/Shopify/VC(USD建て)の行だけ${FX_RATE_ABS}のレートをかけてJPYに揃える。
   sheet.getRange(2, col('実質粗利')).setFormula(
-    `=ARRAYFORMULA(IF($A2:A="","",($L2:L*${FX_RATE_ABS})-$K2:K-$M2:M))`
+    `=ARRAYFORMULA(IF($A2:A="","",IF($D2:D="Mercari",$L2:L-$K2:K-$M2:M,($L2:L*${FX_RATE_ABS})-$K2:K-$M2:M)))`
   );
   sheet.getRange(2, col('粗利率')).setFormula(
-    `=ARRAYFORMULA(IF($A2:A="","",IF($F2:F="","",$N2:N/($F2:F*${FX_RATE_ABS}))))`
+    `=ARRAYFORMULA(IF($A2:A="","",IF($F2:F="","",IF($D2:D="Mercari",$N2:N/$F2:F,$N2:N/($F2:F*${FX_RATE_ABS})))))`
   );
 }
 
