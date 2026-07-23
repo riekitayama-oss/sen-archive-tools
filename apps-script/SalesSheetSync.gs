@@ -34,6 +34,8 @@ const MANUAL_FIELDS = [
   'Channel', '販売日', '販売価格', 'Ad Fee', '値引き額(クーポン等)', '送料実費', '仕入れ値',
 ];
 
+const CHANNEL_OPTIONS = ['eBay', 'Mercari', 'Shopify', 'VC'];
+
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('SEN ARCHIVE')
@@ -69,6 +71,7 @@ function setupSalesSheet() {
   restoreManualData_(sheet, numRows, preserved);
   applyFormulaColumns_(sheet);
   applyFormatting_(sheet, numRows);
+  applyChannelValidation_(sheet, numRows);
   protectAutoColumns_(sheet, numRows);
 
   SpreadsheetApp.flush();
@@ -136,6 +139,14 @@ function applyFormatting_(sheet, numRows) {
   sheet.getRange(2, col('出品日'), numRows, 1).setNumberFormat('yyyy-mm-dd');
   sheet.getRange(2, col('販売日'), numRows, 1).setNumberFormat('yyyy-mm-dd');
   sheet.getRange(2, col('粗利率'), numRows, 1).setNumberFormat('0.0%');
+}
+
+function applyChannelValidation_(sheet, numRows) {
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(CHANNEL_OPTIONS, true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, NEW_HEADERS.indexOf('Channel') + 1, numRows, 1).setDataValidation(rule);
 }
 
 function protectAutoColumns_(sheet, numRows) {
