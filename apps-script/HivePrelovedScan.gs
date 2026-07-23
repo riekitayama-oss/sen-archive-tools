@@ -332,28 +332,31 @@ function ensureHiveSummarySheet_(ss) {
   const countLabel = "count(A) '件数'";
   const avgLabels = "avg(I) '平均HIVE価格(JPY)', avg(J) '平均仕入上限(粗利20%)'";
 
-  sheet.getRange('A1').setValue('ブランド×素材 別 Sold Out集計').setFontWeight('bold');
+  // カテゴリ(Bags/Shoesなど)を含めずにブランド×素材だけで集計すると、
+  // 「バッグはよく売れるが同じ素材の靴は売れない」といった違いが潰れてしまい
+  // 仕入れ判断の役に立たないため、カテゴリ(C列)を常にグルーピングに含める。
+  sheet.getRange('A1').setValue('ブランド×カテゴリ×素材 別 Sold Out集計').setFontWeight('bold');
   sheet.getRange('A2').setFormula(
-    `=IFERROR(QUERY('${HIVE_SHEET_NAME}'!A2:K, "select A, D, count(A), avg(I), avg(J) ` +
-    `where A is not null and D is not null and D <> '' group by A, D order by count(A) desc ` +
+    `=IFERROR(QUERY('${HIVE_SHEET_NAME}'!A2:K, "select A, C, D, count(A), avg(I), avg(J) ` +
+    `where A is not null and D is not null and D <> '' group by A, C, D order by count(A) desc ` +
     `label ${countLabel}, ${avgLabels}", 0), "データがまだありません")`
   );
 
-  sheet.getRange('G1').setValue('ブランド×カラー 別 Sold Out集計').setFontWeight('bold');
-  sheet.getRange('G2').setFormula(
-    `=IFERROR(QUERY('${HIVE_SHEET_NAME}'!A2:K, "select A, E, count(A), avg(I), avg(J) ` +
-    `where A is not null and E is not null and E <> '' group by A, E order by count(A) desc ` +
+  sheet.getRange('H1').setValue('ブランド×カテゴリ×カラー 別 Sold Out集計').setFontWeight('bold');
+  sheet.getRange('H2').setFormula(
+    `=IFERROR(QUERY('${HIVE_SHEET_NAME}'!A2:K, "select A, C, E, count(A), avg(I), avg(J) ` +
+    `where A is not null and E is not null and E <> '' group by A, C, E order by count(A) desc ` +
     `label ${countLabel}, ${avgLabels}", 0), "データがまだありません")`
   );
 
-  sheet.getRange('M1').setValue('ブランド 別 Sold Out集計').setFontWeight('bold');
-  sheet.getRange('M2').setFormula(
-    `=IFERROR(QUERY('${HIVE_SHEET_NAME}'!A2:K, "select A, count(A), avg(I), avg(J) ` +
-    `where A is not null group by A order by count(A) desc ` +
+  sheet.getRange('O1').setValue('ブランド×カテゴリ 別 Sold Out集計').setFontWeight('bold');
+  sheet.getRange('O2').setFormula(
+    `=IFERROR(QUERY('${HIVE_SHEET_NAME}'!A2:K, "select A, C, count(A), avg(I), avg(J) ` +
+    `where A is not null group by A, C order by count(A) desc ` +
     `label ${countLabel}, ${avgLabels}", 0), "データがまだありません")`
   );
 
-  sheet.getRange('C3:E500').setNumberFormat('#,##0');
-  sheet.getRange('I3:K500').setNumberFormat('#,##0');
-  sheet.getRange('N3:P500').setNumberFormat('#,##0');
+  sheet.getRange('D3:F500').setNumberFormat('#,##0');
+  sheet.getRange('K3:M500').setNumberFormat('#,##0');
+  sheet.getRange('Q3:S500').setNumberFormat('#,##0');
 }
