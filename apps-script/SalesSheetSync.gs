@@ -47,7 +47,6 @@ function setupSalesSheet() {
   const preserved = snapshotManualData_(sheet);
 
   sheet.clear();
-  sheet.clearNote();
   sheet.getRange(1, 1, 1, NEW_HEADERS.length)
     .setValues([NEW_HEADERS])
     .setFontWeight('bold');
