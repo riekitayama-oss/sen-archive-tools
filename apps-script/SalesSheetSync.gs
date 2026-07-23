@@ -94,7 +94,7 @@ function setupSalesSheet() {
   const numRows = lastRowInColumn_(sheet, 1) - 1;
   restoreManualData_(sheet, numRows, preserved);
   applyFxRateCell_(sheet);
-  applyFormulaColumns_(sheet);
+  applyFormulaColumns_(sheet, numRows);
   applyFormatting_(sheet, numRows);
   applyChannelValidation_(sheet, numRows);
   protectAutoColumns_(sheet, numRows);
@@ -196,36 +196,51 @@ function restoreManualData_(sheet, numRows, preserved) {
   }
 }
 
-function applyFormulaColumns_(sheet) {
-  const col = (name) => NEW_HEADERS.indexOf(name) + 1;
+// 自動計算列。ARRAYFORMULAで1つの数式を全行にspillさせる方式だと、
+// 誰かがどこか1行にでも手入力すると展開が止まって列全体が#REF!になる
+// (例: 実際のeBay手数料が近似値と違うためTransaction feeを手入力したケース)。
+// そのため各行に独立した数式を入れ、既に手入力されている行はスキップする方式にする。
+const AUTO_FORMULA_COLUMNS = [
+  'Item Name', '出品日', '滞留日数', 'Transaction fee', 'Order earnings', '実質粗利', '粗利率',
+];
 
-  // Item Name/出品日は検品マスターの行順ではなく、自分のSKU(A列)をキーに
-  // 参照テーブル(R:T)からVLOOKUPする。検品マスター側で行が並び替わっても
-  // このSKUに紐づく値だけが変わり、他の行には影響しない。
-  sheet.getRange(2, col('Item Name')).setFormula(
-    `=ARRAYFORMULA(IF($A2:A="","",IFERROR(VLOOKUP($A2:A,${HELPER_RANGE_ABS},2,FALSE),"")))`
-  );
-  sheet.getRange(2, col('出品日')).setFormula(
-    `=ARRAYFORMULA(IF($A2:A="","",IFERROR(VLOOKUP($A2:A,${HELPER_RANGE_ABS},3,FALSE),"")))`
-  );
+function formulaForRow_(name, i) {
+  switch (name) {
+    case 'Item Name':
+      return `=IF($A${i}="","",IFERROR(VLOOKUP($A${i},${HELPER_RANGE_ABS},2,FALSE),""))`;
+    case '出品日':
+      return `=IF($A${i}="","",IFERROR(VLOOKUP($A${i},${HELPER_RANGE_ABS},3,FALSE),""))`;
+    case '滞留日数':
+      return `=IF($C${i}="","",IF($E${i}="",TODAY()-$C${i},$E${i}-$C${i}))`;
+    case 'Transaction fee':
+      return `=IF($D${i}="Mercari",$F${i}*0.1,IF($D${i}="eBay",$F${i}*0.144,""))`;
+    case 'Order earnings':
+      return `=$F${i}-$H${i}-$I${i}-$J${i}`;
+    case '実質粗利':
+      // Mercariは販売価格・Order earningsが元々JPYなので為替換算せず、
+      // eBay/Shopify/VC(USD建て)の行だけ$P$2のレートをかけてJPYに揃える。1円未満は切り捨て。
+      return `=ROUNDDOWN(IF($D${i}="Mercari",$L${i}-$K${i}-$M${i},($L${i}*${FX_RATE_ABS})-$K${i}-$M${i}),0)`;
+    case '粗利率':
+      return `=IF($F${i}="","",IF($D${i}="Mercari",$N${i}/$F${i},$N${i}/($F${i}*${FX_RATE_ABS})))`;
+    default:
+      throw new Error('unknown auto column: ' + name);
+  }
+}
 
-  sheet.getRange(2, col('滞留日数')).setFormula(
-    '=ARRAYFORMULA(IF($A2:A="","",IF($C2:C="","",IF($E2:E="",TODAY()-$C2:C,$E2:E-$C2:C))))'
-  );
-  sheet.getRange(2, col('Transaction fee')).setFormula(
-    '=ARRAYFORMULA(IF($A2:A="","",IF($D2:D="Mercari",$F2:F*0.1,IF($D2:D="eBay",$F2:F*0.144,""))))'
-  );
-  sheet.getRange(2, col('Order earnings')).setFormula(
-    '=ARRAYFORMULA(IF($A2:A="","",$F2:F-$H2:H-$I2:I-$J2:J))'
-  );
-  // Mercariは販売価格・Order earningsが元々JPYなので為替換算せず、
-  // eBay/Shopify/VC(USD建て)の行だけ$P$2のレートをかけてJPYに揃える。1円未満は切り捨て。
-  sheet.getRange(2, col('実質粗利')).setFormula(
-    `=ARRAYFORMULA(IF($A2:A="","",ROUNDDOWN(IF($D2:D="Mercari",$L2:L-$K2:K-$M2:M,($L2:L*${FX_RATE_ABS})-$K2:K-$M2:M),0)))`
-  );
-  sheet.getRange(2, col('粗利率')).setFormula(
-    `=ARRAYFORMULA(IF($A2:A="","",IF($F2:F="","",IF($D2:D="Mercari",$N2:N/$F2:F,$N2:N/($F2:F*${FX_RATE_ABS})))))`
-  );
+function applyFormulaColumns_(sheet, numRows) {
+  if (numRows <= 0) return;
+  AUTO_FORMULA_COLUMNS.forEach((name) => {
+    const c = NEW_HEADERS.indexOf(name) + 1;
+    const range = sheet.getRange(2, c, numRows, 1);
+    const formulas = range.getFormulas();
+    const values = range.getValues();
+    for (let idx = 0; idx < numRows; idx++) {
+      const hasFormula = formulas[idx][0] !== '';
+      const isManualOverride = !hasFormula && values[idx][0] !== '';
+      if (isManualOverride) continue; // 手入力された行はそのまま残す
+      sheet.getRange(idx + 2, c).setFormula(formulaForRow_(name, idx + 2));
+    }
+  });
 }
 
 function applyFxRateCell_(sheet) {
