@@ -47,7 +47,6 @@ const FX_RATE_ABS = '$P$2';
 
 // 検品マスターの参照テーブル(内部用)。R2にQUERYを置き、SKU/Item Name/出品日をR:T列に展開する。
 // B列・C列はここへVLOOKUPするので、検品マスターの行順が変わってもSKUで正しく引ける。
-const HELPER_LABEL_CELL = 'R1';
 const HELPER_FORMULA_CELL = 'R2';
 const HELPER_COL = 18; // R列
 const HELPER_RANGE_ABS = '$R$2:$T';
@@ -131,8 +130,9 @@ function detachOldQuerySpill_(sheet) {
 }
 
 function refreshHelperTable_(sheet) {
-  sheet.getRange(HELPER_LABEL_CELL)
-    .setValue('(内部用・触らない: 検品マスター参照テーブル)')
+  // R:T列全体が内部用(触らない)であることが分かるよう、3列ともラベルを置く。
+  sheet.getRange(1, HELPER_COL, 1, 3)
+    .setValues([['(内部用・触らない)', '(内部用・触らない)', '(内部用・触らない)']])
     .setFontColor('#999999');
   const formula = `=QUERY(IMPORTRANGE("${MASTER_SPREADSHEET_URL}", "${MASTER_RANGE}"), "${MASTER_QUERY}", 0)`;
   sheet.getRange(HELPER_FORMULA_CELL).setFormula(formula);
@@ -267,9 +267,17 @@ function protectAutoColumns_(sheet, numRows) {
   const existing = sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE);
   existing.forEach((p) => {
     if (p.getDescription() === 'auto-sync (検品マスターから自動反映・編集不可)') p.remove();
+    if (p.getDescription() === 'helper (内部用の参照テーブル・編集不可)') p.remove();
   });
 
   const range = sheet.getRange(2, 1, numRows, 3); // A:C = SKU, Item Name, 出品日
   const protection = range.protect().setDescription('auto-sync (検品マスターから自動反映・編集不可)');
   protection.setWarningOnly(true); // 警告のみ。誤って上書きしそうになった時にダイアログで注意喚起する
+
+  // R:T列(参照テーブル)全体も同様に警告つき保護する。QUERYがspillする範囲は
+  // 検品マスターの件数次第で変わるため、シート最大行まで広めに保護しておく。
+  const maxRows = sheet.getMaxRows();
+  const helperRange = sheet.getRange(1, HELPER_COL, maxRows, 3); // R:T
+  const helperProtection = helperRange.protect().setDescription('helper (内部用の参照テーブル・編集不可)');
+  helperProtection.setWarningOnly(true);
 }
