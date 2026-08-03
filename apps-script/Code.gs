@@ -81,6 +81,8 @@ const PERF_DB_HEADERS = [
   '記録日', 'eBay Item ID', 'SKU', '商品名', '出品価格(USD)',
   'Views', 'Impressions', 'CTR', 'Watchers', 'Watch率',
 ];
+const PERF_DB_CTR_COL = PERF_DB_HEADERS.indexOf('CTR') + 1;
+const PERF_DB_WATCH_RATE_COL = PERF_DB_HEADERS.indexOf('Watch率') + 1;
 
 // ------------------------------------------------------------------
 // メニュー
@@ -612,6 +614,13 @@ function writePerfDbSnapshots_(sheet, rows) {
 
   if (newRows.length) {
     sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, PERF_DB_HEADERS.length).setValues(newRows);
+  }
+
+  // CTR・Watch率を%表示に統一する（過去に書き込まれた行も含めて毎回揃える）
+  const finalLastRow = sheet.getLastRow();
+  if (finalLastRow >= 2) {
+    sheet.getRange(2, PERF_DB_CTR_COL, finalLastRow - 1, 1).setNumberFormat('0.00%');
+    sheet.getRange(2, PERF_DB_WATCH_RATE_COL, finalLastRow - 1, 1).setNumberFormat('0.0%');
   }
 }
 
