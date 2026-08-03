@@ -333,7 +333,8 @@ function parseActiveCsv_(sheet) {
     records.push({
       itemId,
       title: String(row[headerMap.title] || '').trim(),
-      watchers: headerMap.watchers !== -1 ? parseNumber_(row[headerMap.watchers]) : null,
+      // eBayのレポートはWatchersが0件のとき空欄で出力するため、列自体はある場合は空欄=0件として扱う
+      watchers: headerMap.watchers !== -1 ? (parseNumber_(row[headerMap.watchers]) ?? 0) : null,
     });
   }
   return records;
