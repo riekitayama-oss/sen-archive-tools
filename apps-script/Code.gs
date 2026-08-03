@@ -11,7 +11,7 @@
  *   ③ メニュー「eBay価格管理」→「① 更新する」を実行する
  *
  * 手入力は一切不要。どちらのレポートも eBay Item ID（Traffic Reportでは
- * "eBay item ID"、Active Listingsでは "Item number"）で商品マスターと突き合わせる。
+ * "eBay item ID"、Active Listingsでは "Item number"）で商品サマリーと突き合わせる。
  *
  * 【自動反映される項目と、その情報源】
  *   - Views / Impressions / CTR … Traffic Report CSV から自動反映
@@ -24,7 +24,7 @@
  *   - Dashboardの今週の順位      … Watch率上位3件を自動生成
  *
  * 「更新履歴」タブは廃止。更新するたびに Performance DB にその週のスナップショットを
- * 自動追加し、商品マスターには常に最新値だけを表示する。
+ * 自動追加し、商品サマリーには常に最新値だけを表示する。
  * =================================================================
  */
 
@@ -33,7 +33,7 @@
 // ------------------------------------------------------------------
 const CSV_TRAFFIC_SHEET_NAME = 'CSVインポート(Traffic Report)';
 const CSV_ACTIVE_SHEET_NAME = 'CSVインポート(Active Listings)';
-const MASTER_SHEET_NAME = '商品マスター';
+const MASTER_SHEET_NAME = '商品サマリー';
 const PERF_DB_SHEET_NAME = 'Performance DB';
 const DASHBOARD_SHEET_NAME = 'Dashboard';
 
@@ -41,7 +41,7 @@ const REVIEW_WINDOW_DAYS = 90; // 90日ルール
 const DASHBOARD_TOP_N = 3;
 const DASHBOARD_WATCH_DROP_N = 5;
 
-// 商品マスターの列見出し（既存 + このスクリプトが自動追加する列）
+// 商品サマリーの列見出し（既存 + このスクリプトが自動追加する列）
 const M = {
   SKU: 'SKU',
   NAME: '商品名',
@@ -65,7 +65,7 @@ const M = {
   ITEM_ID: 'eBay Item ID',
 };
 
-// 商品マスターに必須の既存列（無ければエラーで止める）
+// 商品サマリーに必須の既存列（無ければエラーで止める）
 const REQUIRED_EXISTING_HEADERS = [
   M.SKU, M.NAME, M.LIST_DATE, M.PRICE, M.VIEWS, M.IMPRESSIONS,
   M.CTR, M.WATCHERS, M.JUDGE, M.ITEM_ID,
@@ -81,6 +81,8 @@ const PERF_DB_HEADERS = [
   '記録日', 'eBay Item ID', 'SKU', '商品名', '出品価格(USD)',
   'Views', 'Impressions', 'CTR', 'Watchers', 'Watch率',
 ];
+const PERF_DB_CTR_COL = PERF_DB_HEADERS.indexOf('CTR') + 1;
+const PERF_DB_WATCH_RATE_COL = PERF_DB_HEADERS.indexOf('Watch率') + 1;
 
 // ------------------------------------------------------------------
 // メニュー
@@ -88,7 +90,7 @@ const PERF_DB_HEADERS = [
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('eBay価格管理')
-    .addItem('① 更新する（2つのCSVを商品マスターに反映）', 'runUpdate')
+    .addItem('① 更新する（2つのCSVを商品サマリーに反映）', 'runUpdate')
     .addSeparator()
     .addItem('初期セットアップ（シート/列を確認・作成）', 'setupSheets')
     .addToUi();
@@ -102,10 +104,10 @@ function setupSheets() {
   ensureDashboardSheet_(ss);
   const master = ss.getSheetByName(MASTER_SHEET_NAME);
   if (!master) {
-    throw new Error(`「${MASTER_SHEET_NAME}」シートが見つかりません。既存の商品マスターのシート名を確認してください。`);
+    throw new Error(`「${MASTER_SHEET_NAME}」シートが見つかりません。既存の商品サマリーのシート名を確認してください。`);
   }
   ensureMasterHeaders_(master);
-  SpreadsheetApp.getUi().alert('セットアップ完了：CSVインポート(2種) / Performance DB / Dashboard を確認・作成し、商品マスターの列を確認しました。');
+  SpreadsheetApp.getUi().alert('セットアップ完了：CSVインポート(2種) / Performance DB / Dashboard を確認・作成し、商品サマリーの列を確認しました。');
 }
 
 // ------------------------------------------------------------------
@@ -187,7 +189,7 @@ function ensureDashboardSheet_(ss) {
 }
 
 /**
- * 商品マスターの見出し行を確認し、無ければ末尾に自動追加する。
+ * 商品サマリーの見出し行を確認し、無ければ末尾に自動追加する。
  * 戻り値: { ヘッダー名: 列番号(1始まり) } のマップ
  */
 function ensureMasterHeaders_(sheet) {
@@ -202,7 +204,7 @@ function ensureMasterHeaders_(sheet) {
   const missingRequired = REQUIRED_EXISTING_HEADERS.filter(h => !colByHeader[h]);
   if (missingRequired.length) {
     throw new Error(
-      `商品マスターに必要な列が見つかりません: ${missingRequired.join(', ')}\n` +
+      `商品サマリーに必要な列が見つかりません: ${missingRequired.join(', ')}\n` +
       '列の見出し（1行目）の表記を確認してください。'
     );
   }
@@ -333,14 +335,15 @@ function parseActiveCsv_(sheet) {
     records.push({
       itemId,
       title: String(row[headerMap.title] || '').trim(),
-      watchers: headerMap.watchers !== -1 ? parseNumber_(row[headerMap.watchers]) : null,
+      // eBayのレポートはWatchersが0件のとき空欄で出力するため、列自体はある場合は空欄=0件として扱う
+      watchers: headerMap.watchers !== -1 ? (parseNumber_(row[headerMap.watchers]) ?? 0) : null,
     });
   }
   return records;
 }
 
 // ------------------------------------------------------------------
-// 商品マスター更新（Views/Impressions/CTR/Watchersを2つのCSVから自動反映）
+// 商品サマリー更新（Views/Impressions/CTR/Watchersを2つのCSVから自動反映）
 // ------------------------------------------------------------------
 function updateMasterRows_(sheet, col, trafficRecords, activeRecords, perfDbLatest) {
   const lastRow = sheet.getLastRow(); // ← 固定行数ではなく毎回最終行まで自動取得（下段が反映されないバグの修正点）
@@ -386,7 +389,7 @@ function updateMasterRows_(sheet, col, trafficRecords, activeRecords, perfDbLate
       if (!best) best = findBestTitleMatch_(name, unusedActive());
       if (best) {
         itemId = best.itemId;
-        row[col[M.ITEM_ID] - 1] = itemId; // 商品マスターに自動で書き戻す（次回からIDで直接一致する）
+        row[col[M.ITEM_ID] - 1] = itemId; // 商品サマリーに自動で書き戻す（次回からIDで直接一致する）
         usedIds.add(itemId);
         autoLinkedCount++;
       }
@@ -611,6 +614,13 @@ function writePerfDbSnapshots_(sheet, rows) {
 
   if (newRows.length) {
     sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, PERF_DB_HEADERS.length).setValues(newRows);
+  }
+
+  // CTR・Watch率を%表示に統一する（過去に書き込まれた行も含めて毎回揃える）
+  const finalLastRow = sheet.getLastRow();
+  if (finalLastRow >= 2) {
+    sheet.getRange(2, PERF_DB_CTR_COL, finalLastRow - 1, 1).setNumberFormat('0.00%');
+    sheet.getRange(2, PERF_DB_WATCH_RATE_COL, finalLastRow - 1, 1).setNumberFormat('0.0%');
   }
 }
 
