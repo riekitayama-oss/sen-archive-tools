@@ -1,8 +1,8 @@
 # eBay価格管理表 自動化スクリプト
 
 Googleスプレッドシート「[eBay価格管理表](https://docs.google.com/spreadsheets/d/1mqUP2njh5OwJ8m9wsr_lIxhR8InyaQkzhL63oqn_x1c/edit)」用の
-Google Apps Script（GAS）です。「CSVインポート → 更新履歴 → 商品マスター」という多段フローをやめ、
-**2つのCSVを貼って更新ボタンを押すだけ**（手入力ゼロ）で商品マスター・Dashboard・Performance DBが自動更新される構成にしています。
+Google Apps Script（GAS）です。「CSVインポート → 更新履歴 → 商品サマリー」という多段フローをやめ、
+**2つのCSVを貼って更新ボタンを押すだけ**（手入力ゼロ）で商品サマリー・Dashboard・Performance DBが自動更新される構成にしています。
 
 ## 毎週やること
 
@@ -29,16 +29,16 @@ Google Apps Script（GAS）です。「CSVインポート → 更新履歴 → �
 | 今週やること | 判断・Watch率 | 自動生成 |
 | Dashboardの今週の順位 | Watch率上位3件 | 自動生成 |
 
-Traffic Reportの「Total page views」列が、これまで商品マスターのViewsに手入力していた値と一致することを確認済みです（例: CHANEL CC Ballet Flats = 24件で一致）。Active Listings画面での確認作業は不要になりました。
+Traffic Reportの「Total page views」列が、これまで商品サマリーのViewsに手入力していた値と一致することを確認済みです（例: CHANEL CC Ballet Flats = 24件で一致）。Active Listings画面での確認作業は不要になりました。
 
 Promoted有無・広告レートは現時点でCSV化できるレポートが確認できていないため、引き続きActive Listings画面を見ての手入力が必要です。
 
-「更新履歴」タブは廃止しました。更新のたびに **Performance DB** にその週のスナップショット（Views / Impressions / CTR / Watchers / Watch率など）を自動追加し、商品マスターには常に最新値だけを表示します。過去推移の分析はPerformance DBを見れば追えます。
+「更新履歴」タブは廃止しました。更新のたびに **Performance DB** にその週のスナップショット（Views / Impressions / CTR / Watchers / Watch率など）を自動追加し、商品サマリーには常に最新値だけを表示します。過去推移の分析はPerformance DBを見れば追えます。
 
 ## 今回のバグ修正（新規商品が下段で反映されない問題）
 
 - 更新範囲を `getRange(2, 1, 固定行数, ...)` ではなく `sheet.getLastRow()` で毎回取得するように変更し、行数が増えても最終行まで確実に更新されるようにしました。
-- 商品照合は **eBay Item ID を最優先** で行い、eBay Item IDが未入力の新規商品は **商品名とCSV側のタイトルの類似度** で自動的に紐づけ、見つかったIDを商品マスターに自動で書き戻します（次回以降はIDで直接一致するようになります）。
+- 商品照合は **eBay Item ID を最優先** で行い、eBay Item IDが未入力の新規商品は **商品名とCSV側のタイトルの類似度** で自動的に紐づけ、見つかったIDを商品サマリーに自動で書き戻します（次回以降はIDで直接一致するようになります）。
 - どちらのCSVにも対応が見つからなかった商品は、更新後のアラートに一覧表示されるので、SKU・商品名の表記ゆれを確認できます。
 
 ## セットアップ
