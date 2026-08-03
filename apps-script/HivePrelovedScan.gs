@@ -49,6 +49,10 @@ const HIVE_COLLECTIONS = [
 
 const HIVE_SHEET_NAME = '仕入れ判断シート';
 const HIVE_SUMMARY_SHEET_NAME = '集計サマリー';
+// ここに素材名を1行1つ追加していくと、コードを触らずにHIVE_MATERIAL_KEYWORDSの
+// 既定リストと合わせて使われるようになる(例: レーヨンを追加したい場合はこのタブに
+// 「レーヨン」と1行追加するだけでよい)。
+const HIVE_MATERIAL_LIST_SHEET_NAME = '素材リスト';
 const HIVE_MASTER_SHEET_NAME = '検品マスター';
 // 検品マスターの実データは行3以降(行1=簡易ヘッダー, 行2=正式ヘッダー)。
 // SalesSheetSync.gs側の調査で判明済み: BRANDはCol7(G列)、ITEM NAMEはCol8(H列)。
@@ -135,6 +139,11 @@ function scanHivePreloved() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const outSheet = ensureHiveOutputSheet_(ss);
   ensureHiveConfigCells_(outSheet);
+  const materialListSheet = ensureHiveMaterialListSheet_(ss);
+  const materialKeywords = mergeHiveKeywords_(
+    HIVE_MATERIAL_KEYWORDS,
+    readHiveCustomKeywords_(materialListSheet)
+  );
   const masterIndex = buildHiveMasterIndex_(ss);
   const existingHandles = readHiveExistingHandles_(outSheet);
 
@@ -161,10 +170,10 @@ function scanHivePreloved() {
         brand: p.vendor || '',
         title: p.title || '',
         category: col.label,
-        material: extractHiveMaterial_(p),
+        material: extractHiveMaterial_(p, materialKeywords),
         color: extractHiveColor_(p),
         line: line,
-        tag: extractHiveTag_(p, line),
+        tag: extractHiveTag_(p, line, materialKeywords),
         price: price,
         date: today,
         flag: computeHiveFlag_(p, masterIndex),
@@ -297,8 +306,40 @@ function isHiveSoldOut_(product) {
   return product.variants.every((v) => v.available === false);
 }
 
-function extractHiveMaterial_(product) {
-  return findHiveKeyword_(product, HIVE_MATERIAL_KEYWORDS);
+function extractHiveMaterial_(product, materialKeywords) {
+  return findHiveKeyword_(product, materialKeywords);
+}
+
+// 検品マスターの「素材リスト」タブに書かれた素材名を読み込む(2行目以降、A列)。
+function readHiveCustomKeywords_(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  return sheet.getRange(2, 1, lastRow - 1, 1).getValues()
+    .map((r) => String(r[0]).trim())
+    .filter((v) => v !== '');
+}
+
+// コード内の既定リストと、シートに追加された分をあわせて重複なく返す。
+function mergeHiveKeywords_(defaults, custom) {
+  const seen = new Set(defaults.map((k) => k.toLowerCase()));
+  const merged = defaults.slice();
+  custom.forEach((k) => {
+    if (seen.has(k.toLowerCase())) return;
+    seen.add(k.toLowerCase());
+    merged.push(k);
+  });
+  return merged;
+}
+
+function ensureHiveMaterialListSheet_(ss) {
+  let sheet = ss.getSheetByName(HIVE_MATERIAL_LIST_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(HIVE_MATERIAL_LIST_SHEET_NAME);
+    sheet.getRange('A1')
+      .setValue('素材名(1行に1つ。ここに追加すると次回の調査実行から自動で反映される)')
+      .setFontWeight('bold');
+  }
+  return sheet;
 }
 
 function extractHiveColor_(product) {
@@ -322,10 +363,10 @@ function extractHiveColor_(product) {
 // それも無ければ色名にフォールバックする。ラインが見つからない場合は
 // 柄/素材/色だけのタグになる。line は呼び出し側で既に検出済みのものを渡す
 // (ライン単体の列にも同じ値を使うため、二重に検索しない)。
-function extractHiveTag_(product, line) {
+function extractHiveTag_(product, line, materialKeywords) {
   const modifier =
     findHiveKeyword_(product, HIVE_PATTERN_KEYWORDS) ||
-    findHiveKeyword_(product, HIVE_MATERIAL_KEYWORDS) ||
+    findHiveKeyword_(product, materialKeywords) ||
     findHiveKeyword_(product, HIVE_COLOR_KEYWORDS);
   return [line, modifier].filter(Boolean).join(' ');
 }
