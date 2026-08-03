@@ -124,6 +124,14 @@ HIVE PRELOVED (hivepreloved.com) のShopifyストアを週次で調査し、Sold
   推測しているだけ(`HIVE_MATERIAL_KEYWORDS`/`HIVE_COLOR_KEYWORDS`で調整可能)
 - 価格の通貨は未確認
 
+### 素材の追加方法（コード編集不要）
+
+検品マスターに「素材リスト」タブが自動で作られる。ここのA列に素材名を1行1つ追加すると、
+コード内の`HIVE_MATERIAL_KEYWORDS`の既定リストと自動的に合わさって使われる
+（例: レーヨンが無ければ、このタブに「レーヨン」と1行足すだけでよい。次回の
+`scanHivePreloved`実行から反映される）。コードを直接編集して`HIVE_MATERIAL_KEYWORDS`に
+追加してもよいが、日常的な追加はこのタブで行う方が簡単。
+
 ### 使い方
 
 1. [検品マスター](https://docs.google.com/spreadsheets/d/166BARD0R6QVWFO7uwBQvnZsvmntC9W362UmVdXSXa0Y) を開く
