@@ -2,21 +2,26 @@
  * eBay価格管理表 自動更新スクリプト
  * =================================================================
  * 【週次の作業はこれだけ】
- *   ① eBay Seller HubからTraffic Reportをダウンロードする
- *   ② 「CSVインポート」シートに貼り付ける
- *   ③ eBayの Active Listings 画面を見て、商品マスターの
- *      Views / Watchers（と必要ならPromoted有無・広告レート）を入力する
- *   ④ メニュー「eBay価格管理」→「① 更新する」を実行する
+ *   ① eBay Seller Hubで以下の2つのレポートをダウンロードする
+ *      - Traffic Report              → Views・Impressions・CTR
+ *      - All active listings report  → Watchers
+ *   ② それぞれ対応するシートに貼り付ける（またはFile→Importで取り込む）
+ *      - 「CSVインポート(Traffic Report)」
+ *      - 「CSVインポート(Active Listings)」
+ *   ③ メニュー「eBay価格管理」→「① 更新する」を実行する
+ *
+ * 手入力は一切不要。どちらのレポートも eBay Item ID（Traffic Reportでは
+ * "eBay item ID"、Active Listingsでは "Item number"）で商品マスターと突き合わせる。
  *
  * 【自動反映される項目と、その情報源】
- *   - Impressions / CTR      … Traffic Report CSV から自動反映（このスクリプト）
- *   - Views / Watchers       … Active Listings 画面から手入力（人がやる）
- *   - Watch率                … Watchers ÷ Views で自動計算（このスクリプト）
- *   - 前週比（各指標）        … Performance DB の前回スナップショットと比較して自動計算
- *   - 優先順位               … Watch率が高い順に自動採番
- *   - 残り日数(90日)         … 出品日から自動計算
- *   - 今週やること           … 判断・Watch率から自動生成
- *   - Dashboardの今週の順位  … Watch率上位3件を自動生成
+ *   - Views / Impressions / CTR … Traffic Report CSV から自動反映
+ *   - Watchers                   … Active Listings CSV から自動反映
+ *   - Watch率                    … Watchers ÷ Views で自動計算
+ *   - 前週比（各指標）            … Performance DB の前回スナップショットと比較して自動計算
+ *   - 優先順位                   … Watch率が高い順に自動採番
+ *   - 残り日数(90日)             … 出品日から自動計算
+ *   - 今週やること               … 判断・Watch率から自動生成
+ *   - Dashboardの今週の順位      … Watch率上位3件を自動生成
  *
  * 「更新履歴」タブは廃止。更新するたびに Performance DB にその週のスナップショットを
  * 自動追加し、商品マスターには常に最新値だけを表示する。
@@ -26,7 +31,8 @@
 // ------------------------------------------------------------------
 // 設定
 // ------------------------------------------------------------------
-const CSV_SHEET_NAME = 'CSVインポート';
+const CSV_TRAFFIC_SHEET_NAME = 'CSVインポート(Traffic Report)';
+const CSV_ACTIVE_SHEET_NAME = 'CSVインポート(Active Listings)';
 const MASTER_SHEET_NAME = '商品マスター';
 const PERF_DB_SHEET_NAME = 'Performance DB';
 const DASHBOARD_SHEET_NAME = 'Dashboard';
@@ -82,7 +88,7 @@ const PERF_DB_HEADERS = [
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('eBay価格管理')
-    .addItem('① 更新する（CSV + Views/Watchers を反映）', 'runUpdate')
+    .addItem('① 更新する（2つのCSVを商品マスターに反映）', 'runUpdate')
     .addSeparator()
     .addItem('初期セットアップ（シート/列を確認・作成）', 'setupSheets')
     .addToUi();
@@ -90,7 +96,8 @@ function onOpen() {
 
 function setupSheets() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  ensureCsvSheet_(ss);
+  ensureTrafficCsvSheet_(ss);
+  ensureActiveCsvSheet_(ss);
   ensurePerfDbSheet_(ss);
   ensureDashboardSheet_(ss);
   const master = ss.getSheetByName(MASTER_SHEET_NAME);
@@ -98,7 +105,7 @@ function setupSheets() {
     throw new Error(`「${MASTER_SHEET_NAME}」シートが見つかりません。既存の商品マスターのシート名を確認してください。`);
   }
   ensureMasterHeaders_(master);
-  SpreadsheetApp.getUi().alert('セットアップ完了：CSVインポート / Performance DB / Dashboard を確認・作成し、商品マスターの列を確認しました。');
+  SpreadsheetApp.getUi().alert('セットアップ完了：CSVインポート(2種) / Performance DB / Dashboard を確認・作成し、商品マスターの列を確認しました。');
 }
 
 // ------------------------------------------------------------------
@@ -108,7 +115,8 @@ function runUpdate() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ui = SpreadsheetApp.getUi();
 
-  const csvSheet = ensureCsvSheet_(ss);
+  const trafficSheet = ensureTrafficCsvSheet_(ss);
+  const activeSheet = ensureActiveCsvSheet_(ss);
   const perfDbSheet = ensurePerfDbSheet_(ss);
   ensureDashboardSheet_(ss);
   const masterSheet = ss.getSheetByName(MASTER_SHEET_NAME);
@@ -118,21 +126,23 @@ function runUpdate() {
   }
 
   const headerCols = ensureMasterHeaders_(masterSheet);
-  const csvRecords = parseCsvImport_(csvSheet);
+  const trafficRecords = parseTrafficCsv_(trafficSheet);
+  const activeRecords = parseActiveCsv_(activeSheet);
   const perfDbLatest = loadLatestPerfDbSnapshots_(perfDbSheet);
 
-  const result = updateMasterRows_(masterSheet, headerCols, csvRecords, perfDbLatest);
+  const result = updateMasterRows_(masterSheet, headerCols, trafficRecords, activeRecords, perfDbLatest);
   applyPriority_(masterSheet, headerCols, result.rows);
   writePerfDbSnapshots_(perfDbSheet, result.rows);
   rebuildDashboard_(ss, result.rows);
 
   ui.alert(
     '更新完了\n' +
-    `・CSVから Impressions/CTR を反映: ${result.csvMatchedCount}件\n` +
+    `・Traffic Reportから Views/Impressions/CTR を反映: ${result.trafficMatchedCount}件\n` +
+    `・Active Listingsから Watchers を反映: ${result.activeMatchedCount}件\n` +
     `・タイトル類似度で新規に eBay Item ID を自動紐づけ: ${result.autoLinkedCount}件\n` +
     `・Performance DB にスナップショットを追加: ${result.rows.length}件\n` +
     (result.unmatchedTitles.length
-      ? `・CSVに対応が見つからなかった商品（要確認）:\n  - ${result.unmatchedTitles.join('\n  - ')}`
+      ? `・どちらのCSVにも対応が見つからなかった商品（要確認）:\n  - ${result.unmatchedTitles.join('\n  - ')}`
       : '・CSV未対応の商品はありません')
   );
 }
@@ -140,11 +150,20 @@ function runUpdate() {
 // ------------------------------------------------------------------
 // シート準備
 // ------------------------------------------------------------------
-function ensureCsvSheet_(ss) {
-  let sheet = ss.getSheetByName(CSV_SHEET_NAME);
+function ensureTrafficCsvSheet_(ss) {
+  let sheet = ss.getSheetByName(CSV_TRAFFIC_SHEET_NAME);
   if (!sheet) {
-    sheet = ss.insertSheet(CSV_SHEET_NAME);
-    sheet.getRange(1, 1).setValue('ここに Traffic Report を貼り付けてください（見出し行を含めてそのまま貼り付けでOK）');
+    sheet = ss.insertSheet(CSV_TRAFFIC_SHEET_NAME);
+    sheet.getRange(1, 1).setValue('ここに Traffic Report を貼り付け（またはFile→Importで取り込み）してください');
+  }
+  return sheet;
+}
+
+function ensureActiveCsvSheet_(ss) {
+  let sheet = ss.getSheetByName(CSV_ACTIVE_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(CSV_ACTIVE_SHEET_NAME);
+    sheet.getRange(1, 1).setValue('ここに All active listings report を貼り付け（またはFile→Importで取り込み）してください');
   }
   return sheet;
 }
@@ -201,59 +220,23 @@ function ensureMasterHeaders_(sheet) {
 }
 
 // ------------------------------------------------------------------
-// CSV（Traffic Report）読み込み
+// CSV読み込み共通ユーティリティ
 // ------------------------------------------------------------------
 /**
- * Traffic Report は見出し行の上に「Disclaimers」等の説明行が入ることがあるため、
- * 「eBay item ID」を含む行を見出し行として自動検出する。
+ * 指定した列名（複数候補）を含む行を見出し行として先頭20行から自動検出する。
+ * Traffic Reportは見出し行の上に「Disclaimers」等の説明行が入ることがあるため、
+ * 単純に1行目を見出しとせず、目印列を含む行を探す。
  */
-function parseCsvImport_(sheet) {
-  const lastRow = sheet.getLastRow();
-  const lastCol = sheet.getLastColumn();
-  if (lastRow < 2 || lastCol < 1) return [];
-
-  const values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
-
-  let headerRowIdx = -1;
-  let headerMap = {};
+function findHeaderRow_(values, markerHeaderLower) {
   for (let r = 0; r < Math.min(values.length, 20); r++) {
-    const map = buildCsvHeaderMap_(values[r]);
-    if (map.itemId !== -1) {
-      headerRowIdx = r;
-      headerMap = map;
-      break;
+    const row = values[r];
+    for (let c = 0; c < row.length; c++) {
+      if (String(row[c] || '').trim().toLowerCase() === markerHeaderLower) {
+        return r;
+      }
     }
   }
-  if (headerRowIdx === -1) {
-    throw new Error('CSVインポートシートで見出し行（eBay item ID を含む行）が見つかりません。Traffic Reportをそのまま貼り付けているか確認してください。');
-  }
-
-  const records = [];
-  for (let r = headerRowIdx + 1; r < values.length; r++) {
-    const row = values[r];
-    const itemId = String(row[headerMap.itemId] || '').trim();
-    if (!itemId) continue;
-    records.push({
-      itemId,
-      title: String(row[headerMap.title] || '').trim(),
-      impressions: headerMap.impressions !== -1 ? parseNumber_(row[headerMap.impressions]) : null,
-      ctr: headerMap.ctr !== -1 ? parsePercent_(row[headerMap.ctr]) : null,
-    });
-  }
-  return records;
-}
-
-function buildCsvHeaderMap_(headerRow) {
-  const map = { itemId: -1, title: -1, impressions: -1, ctr: -1 };
-  headerRow.forEach((cell, i) => {
-    const h = String(cell || '').trim().toLowerCase();
-    if (!h) return;
-    if (h === 'ebay item id') map.itemId = i;
-    else if (h === 'listing title') map.title = i;
-    else if (h === 'total impressions') map.impressions = i;
-    else if (h.startsWith('click-through rate')) map.ctr = i;
-  });
-  return map;
+  return -1;
 }
 
 function parseNumber_(v) {
@@ -279,32 +262,115 @@ function parsePercent_(v) {
 }
 
 // ------------------------------------------------------------------
-// 商品マスター更新（Impressions/CTR自動反映 + Views/Watchers手入力を読み取り）
+// Traffic Report CSV（Views / Impressions / CTR）
 // ------------------------------------------------------------------
-function updateMasterRows_(sheet, col, csvRecords, perfDbLatest) {
+function parseTrafficCsv_(sheet) {
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return [];
+
+  const values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  const headerRowIdx = findHeaderRow_(values, 'ebay item id');
+  if (headerRowIdx === -1) {
+    throw new Error(`「${CSV_TRAFFIC_SHEET_NAME}」で見出し行（eBay item ID を含む行）が見つかりません。Traffic Reportをそのまま貼り付けているか確認してください。`);
+  }
+
+  const headerMap = { itemId: -1, title: -1, impressions: -1, ctr: -1, views: -1 };
+  values[headerRowIdx].forEach((cell, i) => {
+    const h = String(cell || '').trim().toLowerCase();
+    if (!h) return;
+    if (h === 'ebay item id') headerMap.itemId = i;
+    else if (h === 'listing title') headerMap.title = i;
+    else if (h === 'total impressions') headerMap.impressions = i;
+    else if (h.startsWith('click-through rate')) headerMap.ctr = i;
+    else if (h === 'total page views') headerMap.views = i;
+  });
+
+  const records = [];
+  for (let r = headerRowIdx + 1; r < values.length; r++) {
+    const row = values[r];
+    const itemId = String(row[headerMap.itemId] || '').trim();
+    if (!itemId) continue;
+    records.push({
+      itemId,
+      title: String(row[headerMap.title] || '').trim(),
+      impressions: headerMap.impressions !== -1 ? parseNumber_(row[headerMap.impressions]) : null,
+      ctr: headerMap.ctr !== -1 ? parsePercent_(row[headerMap.ctr]) : null,
+      views: headerMap.views !== -1 ? parseNumber_(row[headerMap.views]) : null,
+    });
+  }
+  return records;
+}
+
+// ------------------------------------------------------------------
+// All active listings report CSV（Watchers）
+// ------------------------------------------------------------------
+function parseActiveCsv_(sheet) {
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return [];
+
+  const values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  const headerRowIdx = findHeaderRow_(values, 'item number');
+  if (headerRowIdx === -1) {
+    throw new Error(`「${CSV_ACTIVE_SHEET_NAME}」で見出し行（Item number を含む行）が見つかりません。All active listings reportをそのまま貼り付けているか確認してください。`);
+  }
+
+  const headerMap = { itemId: -1, title: -1, watchers: -1 };
+  values[headerRowIdx].forEach((cell, i) => {
+    const h = String(cell || '').trim().toLowerCase();
+    if (!h) return;
+    if (h === 'item number') headerMap.itemId = i;
+    else if (h === 'title') headerMap.title = i;
+    else if (h === 'watchers') headerMap.watchers = i;
+  });
+
+  const records = [];
+  for (let r = headerRowIdx + 1; r < values.length; r++) {
+    const row = values[r];
+    const itemId = String(row[headerMap.itemId] || '').trim();
+    if (!itemId) continue;
+    records.push({
+      itemId,
+      title: String(row[headerMap.title] || '').trim(),
+      watchers: headerMap.watchers !== -1 ? parseNumber_(row[headerMap.watchers]) : null,
+    });
+  }
+  return records;
+}
+
+// ------------------------------------------------------------------
+// 商品マスター更新（Views/Impressions/CTR/Watchersを2つのCSVから自動反映）
+// ------------------------------------------------------------------
+function updateMasterRows_(sheet, col, trafficRecords, activeRecords, perfDbLatest) {
   const lastRow = sheet.getLastRow(); // ← 固定行数ではなく毎回最終行まで自動取得（下段が反映されないバグの修正点）
-  if (lastRow < 2) return { rows: [], csvMatchedCount: 0, autoLinkedCount: 0, unmatchedTitles: [] };
+  if (lastRow < 2) {
+    return { rows: [], trafficMatchedCount: 0, activeMatchedCount: 0, autoLinkedCount: 0, unmatchedTitles: [] };
+  }
 
   const numCols = sheet.getLastColumn();
   const range = sheet.getRange(2, 1, lastRow - 1, numCols);
   const values = range.getValues();
 
-  const csvById = new Map(csvRecords.map(r => [r.itemId, r]));
-  const usedCsvIds = new Set();
+  const trafficById = new Map(trafficRecords.map(r => [r.itemId, r]));
+  const activeById = new Map(activeRecords.map(r => [r.itemId, r]));
+  const usedIds = new Set();
+
+  // 既にeBay Item IDが入っている行は、そのIDをリンク済みとして扱う
+  values.forEach(row => {
+    const itemId = String(row[col[M.ITEM_ID] - 1] || '').trim();
+    if (itemId) usedIds.add(itemId);
+  });
+
+  const unusedTraffic = () => trafficRecords.filter(r => !usedIds.has(r.itemId));
+  const unusedActive = () => activeRecords.filter(r => !usedIds.has(r.itemId));
 
   const today = new Date();
   const rows = [];
   const unmatchedTitles = [];
-  let csvMatchedCount = 0;
+  let trafficMatchedCount = 0;
+  let activeMatchedCount = 0;
   let autoLinkedCount = 0;
-
-  // 1st pass: eBay Item ID が既にある行は ID で直接照合
-  values.forEach(row => {
-    const itemId = String(row[col[M.ITEM_ID] - 1] || '').trim();
-    if (itemId && csvById.has(itemId)) usedCsvIds.add(itemId);
-  });
-
-  const unusedCsvRecords = () => csvRecords.filter(r => !usedCsvIds.has(r.itemId));
 
   for (let i = 0; i < values.length; i++) {
     const row = values[i];
@@ -313,32 +379,36 @@ function updateMasterRows_(sheet, col, csvRecords, perfDbLatest) {
     if (!sku && !name) continue; // 空行はスキップ
 
     let itemId = String(row[col[M.ITEM_ID] - 1] || '').trim();
-    let csvRecord = itemId ? csvById.get(itemId) : null;
 
     // ID未紐づけの新規商品は、タイトル類似度でCSVの行を自動で探して紐づける
-    if (!csvRecord && name) {
-      const candidates = unusedCsvRecords();
-      const best = findBestTitleMatch_(name, candidates);
+    if (!itemId && name) {
+      let best = findBestTitleMatch_(name, unusedTraffic());
+      if (!best) best = findBestTitleMatch_(name, unusedActive());
       if (best) {
-        csvRecord = best;
         itemId = best.itemId;
         row[col[M.ITEM_ID] - 1] = itemId; // 商品マスターに自動で書き戻す（次回からIDで直接一致する）
+        usedIds.add(itemId);
         autoLinkedCount++;
       }
     }
 
-    if (csvRecord) {
-      usedCsvIds.add(csvRecord.itemId);
-      if (csvRecord.impressions !== null) row[col[M.IMPRESSIONS] - 1] = csvRecord.impressions;
-      if (csvRecord.ctr !== null) {
-        row[col[M.CTR] - 1] = csvRecord.ctr;
-      }
-      csvMatchedCount++;
-    } else if (name) {
+    const trafficRecord = itemId ? trafficById.get(itemId) : null;
+    const activeRecord = itemId ? activeById.get(itemId) : null;
+
+    if (trafficRecord) {
+      if (trafficRecord.views !== null) row[col[M.VIEWS] - 1] = trafficRecord.views;
+      if (trafficRecord.impressions !== null) row[col[M.IMPRESSIONS] - 1] = trafficRecord.impressions;
+      if (trafficRecord.ctr !== null) row[col[M.CTR] - 1] = trafficRecord.ctr;
+      trafficMatchedCount++;
+    }
+    if (activeRecord) {
+      if (activeRecord.watchers !== null) row[col[M.WATCHERS] - 1] = activeRecord.watchers;
+      activeMatchedCount++;
+    }
+    if (!trafficRecord && !activeRecord && name) {
       unmatchedTitles.push(name);
     }
 
-    // Views / Watchers は Active Listings 画面からの手入力値をそのまま使用（このスクリプトは書き換えない）
     const views = parseNumber_(row[col[M.VIEWS] - 1]);
     const watchers = parseNumber_(row[col[M.WATCHERS] - 1]);
     const impressions = parseNumber_(row[col[M.IMPRESSIONS] - 1]);
@@ -383,7 +453,7 @@ function updateMasterRows_(sheet, col, csvRecords, perfDbLatest) {
   sheet.getRange(2, col[M.CTR], values.length, 1).setNumberFormat('0.00%');
   sheet.getRange(2, col[M.WATCH_RATE], values.length, 1).setNumberFormat('0.0%');
 
-  return { rows, csvMatchedCount, autoLinkedCount, unmatchedTitles };
+  return { rows, trafficMatchedCount, activeMatchedCount, autoLinkedCount, unmatchedTitles };
 }
 
 function diffOrNull_(current, previous) {
