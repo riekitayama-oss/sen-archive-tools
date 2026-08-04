@@ -59,6 +59,7 @@ const HIVE_MASTER_SHEET_NAME = '検品マスター';
 const HIVE_MASTER_DATA_START_ROW = 3;
 const HIVE_MASTER_BRAND_COL = 7;
 const HIVE_MASTER_TITLE_COL = 8;
+const HIVE_MASTER_MATERIAL_COL = 15; // O列 = MATERIAL
 
 const HIVE_OUTPUT_HEADERS = [
   'ブランド', '型番/アイテム名', 'カテゴリ', '素材(推定)', 'カラー(推定)',
@@ -140,8 +141,10 @@ function scanHivePreloved() {
   const outSheet = ensureHiveOutputSheet_(ss);
   ensureHiveConfigCells_(outSheet);
   const materialListSheet = ensureHiveMaterialListSheet_(ss);
+  // 素材の既知リストは3つ合わせる: コード内の既定値 + 検品マスターのMATERIAL列(O列)に
+  // 既に入っている実績値 + 「素材リスト」タブへの手入力分(まだ在庫に無い素材を先読みしたい時用)。
   const materialKeywords = mergeHiveKeywords_(
-    HIVE_MATERIAL_KEYWORDS,
+    mergeHiveKeywords_(HIVE_MATERIAL_KEYWORDS, readHiveMasterMaterials_(ss)),
     readHiveCustomKeywords_(materialListSheet)
   );
   const masterIndex = buildHiveMasterIndex_(ss);
@@ -282,6 +285,25 @@ function buildHiveMasterIndex_(ss) {
     index.push({ brand: String(brand || ''), title: String(title || '') });
   }
   return index;
+}
+
+// 検品マスターのMATERIAL列(O列)に既に入力されている素材名を集める。
+// セル内に「Metal, Enamel」のようにカンマ区切りで複数入っている場合も分割する。
+function readHiveMasterMaterials_(ss) {
+  const sheet = ss.getSheetByName(HIVE_MASTER_SHEET_NAME);
+  if (!sheet) return [];
+  const lastRow = sheet.getLastRow();
+  if (lastRow < HIVE_MASTER_DATA_START_ROW) return [];
+  const numRows = lastRow - HIVE_MASTER_DATA_START_ROW + 1;
+  const values = sheet.getRange(HIVE_MASTER_DATA_START_ROW, HIVE_MASTER_MATERIAL_COL, numRows, 1).getValues();
+  const materials = [];
+  values.forEach((r) => {
+    String(r[0]).split(/[,、\/]/).forEach((part) => {
+      const trimmed = part.trim();
+      if (trimmed) materials.push(trimmed);
+    });
+  });
+  return materials;
 }
 
 // Shopifyの /collections/{handle}/products.json をページングしながら全件取得する。
