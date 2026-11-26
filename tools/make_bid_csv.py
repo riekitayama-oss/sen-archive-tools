@@ -11,7 +11,7 @@ RANK, OUTDIR, RATE, MIN_PAST, ORIGS = sys.argv[1], sys.argv[2], float(sys.argv[3
 src = open(os.path.join(os.path.dirname(__file__), 'match_ranking.py'), encoding='utf-8').read()
 exec(src[src.index('# ---------- brand'):src.index('def ref_rows')])  # BRANDS/MODELS/MATS/IS_BAG/NOT_BAG
 ALIASES = {'Epsom': ['Epsom', 'Veau Epsom', 'Vaux Epsom'], 'Vogue Gulliver': ['Vogue Gulliver', 'Gulliver']}  # 同一素材の表記ゆれのみ
-MODEL_ALIASES = {'City': ['City', 'The City']}
+MODEL_ALIASES = {'City': ['City', 'The City'], 'Muse': ['Muse', 'Muse Bag']}
 
 def num(s):
     s = (s or '').replace(',', '').replace('¥', '').strip()
@@ -51,15 +51,15 @@ def evaluate(name, price):
     """入札対象なら (dict) を返す。対象外は (None, 理由)"""
     if 'JAPAN ONLY' in name: return None, 'JAPAN ONLY'
     if NOT_BAG.search(name) or not IS_BAG.search(name): return None, 'バッグ以外'
-    b = next((bb for p, bb in BRANDS if re.search(p, name)), None)
+    b = next((bb for p, bb in BRANDS if re.search(p, name, re.I)), None)
     if b not in MODELS: return None, 'ランキング外'
     model = next((m for p, m in MODELS[b] if re.search(p, name)), None)
     if not model: return None, 'ランキング外'
     if b == 'CHANEL' and model == 'Classic Flap' and re.search('セカンド|クラッチ|ポーチ', name): return None, 'ランキング外'
-    if b == 'PRADA': return None, 'PRADAナイロン(型まとめ集計のため除外)'
+    if model == 'Tessuto/Nylon': return None, 'PRADAナイロン(型まとめ集計のため除外)'
     mat = next((m for p, m in MATS if re.search(p, name)), None)
     if not mat: return None, '素材不明'
-    row = next((full[(b, mo, a)] for mo in MODEL_ALIASES.get(model, [model]) for a in ALIASES.get(mat, [mat]) if (b, mo, a) in full), None)
+    row = next((full[(bb, mo, a)] for bb in BRAND_ALIASES.get(b, [b]) for mo in MODEL_ALIASES.get(model, [model]) for a in ALIASES.get(mat, [mat]) if (bb, mo, a) in full), None)
     if not row: return None, f'{model}×{mat} のデータなし'
     med, n = num(row['過去売価中央値']), int(num(row['過去Sold']) or 0)
     if not med: return None, f'{model}×{mat} 過去売価なし'

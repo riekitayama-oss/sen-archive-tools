@@ -29,7 +29,9 @@ for x in rows:
 # ---------- brand / model / material dictionaries ----------
 BRANDS = [('HERMES|エルメス', 'HERMES'), ('CHANEL|シャネル', 'CHANEL'), ('LOUIS|ヴィトン', 'LOUIS VUITTON'),
           ('GUCCI|グッチ', 'GUCCI'), ('PRADA|プラダ', 'PRADA'), ('CELINE|セリーヌ', 'CELINE'), ('FENDI|フェンディ', 'FENDI'),
-          ('DIOR|ディオール', 'DIOR'), ('BALENCIAGA|バレンシアガ', 'BALENCIAGA'), ('BOTTEGA|ボッテガ', 'BOTTEGA VENETA'), ('LOEWE|ロエベ', 'LOEWE')]
+          ('DIOR|ディオール', 'DIOR'), ('BALENCIAGA|バレンシアガ', 'BALENCIAGA'), ('BOTTEGA|ボッテガ', 'BOTTEGA VENETA'), ('LOEWE|ロエベ', 'LOEWE'),
+          ('MIU ?MIU|ミュウミュウ', 'MIU MIU'), ('SAINT ?LAURENT|サンローラン|YSL', 'SAINT LAURENT')]
+BRAND_ALIASES = {'SAINT LAURENT': ['SAINT LAURENT', 'YVES SAINT LAURENT']}
 MODELS = {
     'HERMES': [('バーキン', 'Birkin'), ('ケリー', 'Kelly'), ('エブリン|エヴリン', 'Evelyne'), ('ピコタン', 'Picotin'),
                ('ガーデンパーティ', 'Garden Party'), ('ボリード', 'Bolide'), ('コンスタンス', 'Constance'), ('プリュム', 'Plume')],
@@ -38,12 +40,16 @@ MODELS = {
     'LOUIS VUITTON': [('スピーディ', 'Speedy'), ('ネヴァーフル|ネバーフル', 'Neverfull'), ('パピヨン', 'Papillon'),
                       ('ポシェット[・ ]?アクセソワール', 'Pochette Accessoire'), ('ノエ', 'Noé'), ('アルマ', 'Alma'), ('キーポル', 'Keepall')],
     'FENDI': [('バゲット|マンマ', 'Baguette'), ('ピーカブー', 'Peekaboo'), ('ズッカ.*ショルダー|ズッカ.*ワンショル', 'FF Zucca Pattern Shoulder Bag')],
-    'DIOR': [('サドル', 'Saddle'), ('レディ ?ディオール|レディディオール', 'Lady Dior')],
+    'DIOR': [('サドル', 'Saddle'), ('レディ ?ディオール', 'Lady Dior'), ('ブック ?トート', 'Book Tote'), ('マリス', 'Malice'),
+             ('トロッター.*ショルダー', 'Trotter Pattern Shoulder Bag in'), ('トロッター.*(ハンド|トート)', 'Trotter Pattern Handbag')],
     'BALENCIAGA': [('シティ', 'City'), ('ファースト', 'The First')],
     'BOTTEGA VENETA': [('イントレ', 'Intrecciato')],
-    'LOEWE': [('アマソナ', 'Amazona'), ('パズル', 'Puzzle Small 2-way Bag')],
+    'LOEWE': [('アマソナ', 'Amazona'), ('パズル', 'Puzzle Small 2-way Bag'), ('ハンモック', 'Hammock Small 2-Way Bag'),
+              ('フラメンコ', 'Anagram Flamenco Shoulder Bag')],
+    'MIU MIU': [('マドラス', 'Madras 2-way bag,'), ('ヴィッテロ|VITELLO', 'Vitello')],
+    'SAINT LAURENT': [('ミューズ ?トゥ|ミューズ2', 'Muse Two'), ('ミューズ', 'Muse'), ('カバ ?シック', 'Cabas Chic 2-way Handbag')],
     'GUCCI': [('ジャッキー', 'Jackie'), ('ホースビット', 'Horsebit'), ('ソーホー', 'Soho')],
-    'PRADA': [('テスート|ナイロン', 'Tessuto/Nylon'), ('ボニー', 'Mini Bonnie')],
+    'PRADA': [('ミニ ?ボニー', 'Mini Bonnie'), ('ボニー', 'Bonnie'), ('テスート|ナイロン', 'Tessuto/Nylon')],
     'CELINE': [('ラゲージ', 'Luggage'), ('マカダム', 'Macadam')],
 }
 MATS = [('トゴ', 'Togo'), ('トリヨン|クレマンス', 'Taurillon Clemence'), ('ボックスカーフ|BOX', 'Calfskin'),
@@ -51,9 +57,9 @@ MATS = [('トゴ', 'Togo'), ('トリヨン|クレマンス', 'Taurillon Clemence
         ('アリゲーター|クロコ|リザード|ヒマラヤ|ポロサス|オーストリッチ|パイソン', 'Exotic Leather'),
         ('(?<!グ)ラム', 'Lambskin'), ('キャビア', 'Caviar Skin'), ('ツイード', 'Tweed'), ('デニム', 'Denim'), ('ヴェルニ|エナメル|パテント', 'Patent Leather'),
         ('ベロア|ベルベット', 'Velvet'), ('コットン', 'Cotton'), ('サテン', 'Satin'), ('スエード', 'Suede'), ('ファー|ハラコ', 'Haircalf/Fur'),
-        ('モノグラム|ダミエ|キャンバス|トワル|ズッカ|GG', 'Canvas'), ('ナイロン|テスート', 'Nylon'),
+        ('モノグラム|ダミエ|キャンバス|トワル|ズッカ|ズッキーノ|GG|PVC|トロッター|オブリーク|ジャガード', 'Canvas'), ('ナイロン|テスート', 'Nylon'),
         ('エピ|ノマド|タイガ|カーフ|レザー|革', 'Leather')]
-MODEL_ALIASES = {'City': ['City', 'The City']}
+MODEL_ALIASES = {'City': ['City', 'The City'], 'Muse': ['Muse', 'Muse Bag']}
 ALIASES = {'Epsom': ['Epsom', 'Veau Epsom', 'Vaux Epsom'], 'Vogue Gulliver': ['Vogue Gulliver', 'Gulliver'],
            'Canvas': ['Canvas', 'Toile H'], 'Calfskin': ['Calfskin', 'Leather']}
 IS_BAG = re.compile('バッグ|バック|トート|ボストン|リュック|ショルダー|ハンド|クラッチ|セカンド|アクセソワール')
