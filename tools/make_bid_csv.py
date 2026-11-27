@@ -55,7 +55,7 @@ def evaluate(name, price):
     if b not in MODELS: return None, 'ランキング外'
     model = next((m for p, m in MODELS[b] if re.search(p, name)), None)
     if not model: return None, 'ランキング外'
-    if b == 'CHANEL' and model == 'Classic Flap' and re.search('セカンド|クラッチ|ポーチ', name): return None, 'ランキング外'
+    if b == 'CHANEL' and model in ('Classic Flap', '2.55') and re.search('セカンド|クラッチ|ポーチ|リュック|バックパック|バニティ|ウエスト|ウェスト|トート', name): return None, 'ランキング外(フラップ以外の型)'
     if model == 'Tessuto/Nylon': return None, 'PRADAナイロン(型まとめ集計のため除外)'
     mat = next((m for p, m in MATS if re.search(p, name)), None)
     if not mat: return None, '素材不明'
